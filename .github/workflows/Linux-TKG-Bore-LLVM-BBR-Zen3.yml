@@ -1,4 +1,4 @@
-name: build-linux-tkg (Debian 13, estrategias de módulos)
+name: Linux-TKG-Bore-LLVM-BBR-Zen3 (Debian 13 container)
 
 on:
   workflow_dispatch:

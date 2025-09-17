@@ -32,7 +32,6 @@ jobs:
           if [ -z "${VER:-}" ] || [ "$VER" = "null" ]; then
             echo "::error::No se pudo obtener versión estable no-EOL"; exit 1
           fi
-          # Asegurar prefijo "v"
           if [[ "$VER" =~ ^v ]]; then
             VVER="$VER"
           else
@@ -47,14 +46,21 @@ jobs:
         run: |
           mkdir -p .state
           PREV="$(cat .state/latest_kernel.txt 2>/dev/null || true)"
+          PREV="$(printf '%s' "$PREV" | tr -d '\r\n')"
+          CUR="${{ steps.kver.outputs.latest }}"
           echo "prev=$PREV" >> "$GITHUB_OUTPUT"
-          if [ "$PREV" = "${{ steps.kver.outputs.latest }}" ]; then
+
+          if [ "$PREV" = "$CUR" ]; then
+            echo "dispatch=false" >> "$GITHUB_OUTPUT"
             echo "Sin cambios. Nada que disparar."
-            exit 0
+          else
+            echo "$CUR" > .state/latest_kernel.txt
+            echo "dispatch=true" >> "$GITHUB_OUTPUT"
+            echo "Nueva versión detectada: $CUR"
           fi
-          echo "${{ steps.kver.outputs.latest }}" > .state/latest_kernel.txt
 
       - name: Guardar estado (commit)
+        if: steps.state.outputs.dispatch == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -66,6 +72,7 @@ jobs:
 
       # ===== Despachos (solo pasamos kernel_version; el resto usa defaults) =====
       - name: Dispatch Zen3
+        if: steps.state.outputs.dispatch == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -76,6 +83,7 @@ jobs:
             -d '{"ref":"main","inputs":{"kernel_version":"'"${{ steps.kver.outputs.latest }}"'"}}'
 
       - name: Dispatch TigerLake
+        if: steps.state.outputs.dispatch == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -86,6 +94,7 @@ jobs:
             -d '{"ref":"main","inputs":{"kernel_version":"'"${{ steps.kver.outputs.latest }}"'"}}'
 
       - name: Dispatch x86-64-v3
+        if: steps.state.outputs.dispatch == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

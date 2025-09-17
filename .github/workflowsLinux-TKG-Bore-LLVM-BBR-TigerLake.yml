@@ -1,0 +1,206 @@
+name: Linux-TKG-Bore-LLVM-BBR-TigerLake (Debian 13 container)
+
+on:
+  workflow_dispatch:
+    inputs:
+      tkg_ref:
+        description: "Rama/tag de linux-tkg a usar (p.e. master)"
+        default: "master"
+        required: true
+      release_tag:
+        description: "Tag del Release a crear (vacío = auto)"
+        default: ""
+        required: false
+      modules_strategy:
+        description: "Estrategia de módulos: modprobed | diet | full"
+        default: "modprobed"
+        required: true
+      cpu_opt:
+        description: "Processor opt (p.e. znver3, x86-64-v3, tigerlake, native)"
+        default: "tigerlake"
+        required: true
+      kernel_version:
+        description: "Versión del kernel (p.e. v6.16.5 o 6.16-latest)"
+        default: "6.16-latest"
+        required: true
+      cpusched:
+        description: "Scheduler: bore | eevdf | pds | bmq | cfs"
+        default: "bore"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: debian:13
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      # ====== Valores base ======
+      _distro: "Debian"
+      _compiler: "llvm"
+      _llvm_ias: "1"
+      _lto_mode: "thin"
+      _tcp_cong_alg: "bbr"
+      _default_cpu_gov: "performance"
+      _rr_interval: "default"
+      _tickless: "2"
+      _timer_freq: "1000"
+      _acs_override: "false"
+      _logging_use_script: "no"
+      _install_after_building: "no"
+      _aggressive_ondemand: "false"
+      _menunconfig: "false"
+      _custom_commandline: "quiet loglevel=3 systemd.show_status=auto udev.log_priority=3 amd_pstate=active intel_pstate=active nowatchdog nmi_watchdog=0 kernel.split_lock_mitigate=0 mitigations=off"
+      # Por defecto, ambas desactivadas; se ajustarán según modules_strategy
+      _modprobeddb: "false"
+      _kernel_on_diet: "false"
+      _modprobeddb_db_path: "/root/.config/modprobed.db"
+
+    steps:
+      - name: Preparar apt y dependencias base
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates curl git xz-utils \
+            build-essential fakeroot dpkg-dev \
+            bc bison flex libssl-dev libelf-dev dwarves \
+            clang lld llvm ccache libncurses-dev rsync \
+            pkg-config file
+          update-ca-certificates
+
+      - name: Checkout (este repo)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar versión, CPU, scheduler y localversion
+        id: cfg
+        shell: bash
+        run: |
+          echo "_version=${{ github.event.inputs.kernel_version }}" >> $GITHUB_ENV
+          echo "_processor_opt=${{ github.event.inputs.cpu_opt }}" >> $GITHUB_ENV
+          echo "_kernel_localversion=-redroot-${{ github.event.inputs.cpu_opt }}" >> $GITHUB_ENV
+
+          SCHED="${{ github.event.inputs.cpusched }}"
+          case "$SCHED" in
+            bore|eevdf|pds|bmq|cfs)
+              echo "_cpusched=$SCHED" >> $GITHUB_ENV
+              ;;
+            *)
+              echo "::error::cpusched inválido: $SCHED (usa bore|eevdf|pds|bmq|cfs)"
+              exit 1
+              ;;
+          esac
+
+      - name: Configurar estrategia de módulos
+        id: modestrat
+        shell: bash
+        run: |
+          STRAT="${{ github.event.inputs.modules_strategy }}"
+          case "$STRAT" in
+            modprobed)
+              if [ ! -f "modprobed.db" ]; then
+                echo "::error::modules_strategy=modprobed pero no existe ./modprobed.db en la raíz del repo"
+                exit 1
+              fi
+              mkdir -p /root/.config
+              cp modprobed.db /root/.config/modprobed.db
+              chmod 600 /root/.config/modprobed.db
+              echo "_modprobeddb=true"     >> $GITHUB_ENV
+              echo "_kernel_on_diet=false" >> $GITHUB_ENV
+              echo "mode=modprobed" >> $GITHUB_OUTPUT
+              ;;
+            diet)
+              echo "_kernel_on_diet=true"  >> $GITHUB_ENV
+              echo "_modprobeddb=false"    >> $GITHUB_ENV
+              echo "mode=diet" >> $GITHUB_OUTPUT
+              ;;
+            full)
+              echo "_kernel_on_diet=false" >> $GITHUB_ENV
+              echo "_modprobeddb=false"    >> $GITHUB_ENV
+              echo "mode=full" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "::error::modules_strategy inválida: $STRAT (usa modprobed | diet | full)"
+              exit 1
+              ;;
+          esac
+          echo "Estrategia de módulos: $STRAT"
+
+      - name: Mostrar configuración efectiva
+        run: |
+          echo "Kernel:         $_version"
+          echo "CPU opt:        $_processor_opt"
+          echo "Scheduler:       $_cpusched"
+          echo "Localversion:    $_kernel_localversion"
+          echo "Compiler:        $_compiler (LTO=$_lto_mode IAS=$_llvm_ias)"
+          echo "Gov:             $_default_cpu_gov"
+          echo "TCP:             $_tcp_cong_alg"
+          echo "Tickless:        $_tickless / HZ=$_timer_freq"
+          echo "Diet:            $_kernel_on_diet"
+          echo "modprobeddb:     $_modprobeddb (path $_modprobeddb_db_path)"
+          echo "menunconfig:     $_menunconfig"
+          echo "cmdline:         $_custom_commandline"
+
+      - name: Clonar linux-tkg
+        run: |
+          git clone https://github.com/Frogging-Family/linux-tkg
+          cd linux-tkg
+          git fetch --all --tags
+          git checkout "${{ github.event.inputs.tkg_ref }}"
+
+      - name: Compilar kernel (no interactivo)
+        working-directory: linux-tkg
+        shell: bash
+        run: |
+          chmod +x install.sh
+          set -e
+          ./install.sh install || {
+            echo "::warning::install.sh pidió interacción; reintentando con respuestas por defecto"
+            yes "" ./install.sh install
+          }
+
+      - name: Recolectar .deb
+        shell: bash
+        run: |
+          mkdir -p dist
+          find . -type f -name "*.deb" -exec cp -v {} dist/ \; || true
+          find linux-tkg -type f -name "*.deb" -exec cp -v {} dist/ \; || true
+          find .. -maxdepth 1 -type f -name "*.deb" -exec cp -v {} dist/ \; || true
+          if [ -z "$(ls -A dist/*.deb 2>/dev/null)" ]; then
+            echo "No se encontraron .deb"; exit 1
+          fi
+          echo "Paquetes encontrados:"
+          ls -lh dist
+
+      - name: Extraer versión (para nombrar release)
+        id: meta
+        shell: bash
+        run: |
+          DEB="$(ls dist/*.deb | head -n1)"
+          VER="$(dpkg-deb -f "$DEB" Version || true)"
+          [ -z "$VER" ] && VER="unknown-${GITHUB_RUN_NUMBER}"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Subir artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-tkg-amd64-${{ steps.meta.outputs.version }}
+          path: dist/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Crear Release y adjuntar .deb
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag || format('linux-tkg-{0}', steps.meta.outputs.version) }}
+          name: Linux-tkg ${{ steps.meta.outputs.version }}
+          files: dist/*.deb
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

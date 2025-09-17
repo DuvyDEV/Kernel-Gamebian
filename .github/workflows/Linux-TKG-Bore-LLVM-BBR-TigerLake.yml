@@ -13,7 +13,7 @@ on:
         required: false
       modules_strategy:
         description: "Estrategia de módulos: modprobed | diet | full"
-        default: "full"
+        default: "diet"
         required: true
       cpu_opt:
         description: "Processor opt (p.e. znver3, x86-64-v3, tigerlake, native)"

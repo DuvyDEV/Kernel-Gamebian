@@ -58,7 +58,7 @@ jobs:
       # Por defecto, ambas desactivadas; se ajustarán según modules_strategy
       _modprobeddb: "false"
       _kernel_on_diet: "false"
-      _modprobeddb_db_path: "/root/.config/modprobed-tigerlake.db"
+      _modprobeddb_db_path: "/root/.config/modprobed.db"
 
     steps:
       - name: Preparar apt y dependencias base
@@ -108,7 +108,7 @@ jobs:
                 exit 1
               fi
               mkdir -p /root/.config
-              cp modprobed.db /root/.config/modprobed.db
+              cp tigerlake/modprobed.db /root/.config/modprobed.db
               chmod 600 /root/.config/modprobed.db
               echo "_modprobeddb=true"     >> $GITHUB_ENV
               echo "_kernel_on_diet=false" >> $GITHUB_ENV

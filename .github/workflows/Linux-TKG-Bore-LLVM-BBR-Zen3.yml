@@ -103,26 +103,28 @@ jobs:
           STRAT="${{ github.event.inputs.modules_strategy }}"
           case "$STRAT" in
             modprobed)
-              if [ ! -f "modprobed.db" ]; then
-                echo "::error::modules_strategy=modprobed pero no existe ./modprobed.db en la raíz del repo"
+              # Usa un modprobed.db por CPU: modprobed/<cpu_opt>/modprobed.db
+              DB_PATH="modprobed/${{ github.event.inputs.cpu_opt }}/modprobed.db"
+              if [ ! -f "$DB_PATH" ]; then
+                echo "::error::modules_strategy=modprobed pero no existe $DB_PATH en el repo"
                 exit 1
               fi
               mkdir -p /root/.config
-              cp modprobed/zen3/modprobed.db /root/.config/modprobed.db
+              cp "$DB_PATH" /root/.config/modprobed.db
               chmod 600 /root/.config/modprobed.db
-              echo "_modprobeddb=true"     >> $GITHUB_ENV
-              echo "_kernel_on_diet=false" >> $GITHUB_ENV
-              echo "mode=modprobed" >> $GITHUB_OUTPUT
+              echo "_modprobeddb=true"      >> $GITHUB_ENV
+              echo "_kernel_on_diet=false"  >> $GITHUB_ENV
+              echo "mode=modprobed"         >> $GITHUB_OUTPUT
               ;;
             diet)
-              echo "_kernel_on_diet=true"  >> $GITHUB_ENV
-              echo "_modprobeddb=false"    >> $GITHUB_ENV
-              echo "mode=diet" >> $GITHUB_OUTPUT
+              echo "_kernel_on_diet=true"   >> $GITHUB_ENV
+              echo "_modprobeddb=false"     >> $GITHUB_ENV
+              echo "mode=diet"              >> $GITHUB_OUTPUT
               ;;
             full)
-              echo "_kernel_on_diet=false" >> $GITHUB_ENV
-              echo "_modprobeddb=false"    >> $GITHUB_ENV
-              echo "mode=full" >> $GITHUB_OUTPUT
+              echo "_kernel_on_diet=false"  >> $GITHUB_ENV
+              echo "_modprobeddb=false"     >> $GITHUB_ENV
+              echo "mode=full"              >> $GITHUB_OUTPUT
               ;;
             *)
               echo "::error::modules_strategy inválida: $STRAT (usa modprobed | diet | full)"

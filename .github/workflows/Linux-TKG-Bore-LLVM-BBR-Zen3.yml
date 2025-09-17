@@ -1,4 +1,4 @@
-name: Linux-TKG-Bore-LLVM-BBR-Zen3 (Debian 13 container)
+name: build-linux-tkg (Debian 13, estrategias de módulos)
 
 on:
   workflow_dispatch:
@@ -11,9 +11,25 @@ on:
         description: "Tag del Release a crear (vacío = auto)"
         default: ""
         required: false
+      modules_strategy:
+        description: "Estrategia de módulos: modprobed | diet | full"
+        default: "modprobed"
+        required: true
+      cpu_opt:
+        description: "Processor opt (p.e. znver3, x86-64-v3, tigerlake, native)"
+        default: "znver3"
+        required: true
+      kernel_version:
+        description: "Versión del kernel (p.e. v6.16.5)"
+        default: "v6.16.5"
+        required: true
+      cpusched:
+        description: "Scheduler: bore | eevdf | pds | bmq | cfs"
+        default: "bore"
+        required: true
 
 permissions:
-  contents: write  # necesario para crear el Release
+  contents: write
 
 jobs:
   build:
@@ -23,24 +39,25 @@ jobs:
 
     env:
       DEBIAN_FRONTEND: noninteractive
-      # ====== Requisitos del usuario ======
+      # ====== Valores base ======
       _distro: "Debian"
-      _version: "v6.16.5"             # kernel v6.16.5
-      _cpusched: "bore"
-      _compiler: "llvm"              # usar clang/llvm
-      _llvm_ias: "1"                 # assembler integrado LLVM
-      _lto_mode: "thin"              # LLVM ThinLTO
-      _tcp_cong_alg: "bbr"           # TCP BBR
+      _compiler: "llvm"
+      _llvm_ias: "1"
+      _lto_mode: "thin"
+      _tcp_cong_alg: "bbr"
       _default_cpu_gov: "performance"
-      _kernel_on_diet: "true"
-      # _rr_interval: "default"
-      _tickless: "2"                 # tickless idle
+      _rr_interval: "default"
+      _tickless: "2"
       _timer_freq: "1000"
-      _processor_opt: "znver3"
       _acs_override: "false"
-      _logging_use_script: "no"      # evitar problemas en CI
+      _logging_use_script: "no"
       _install_after_building: "no"
+      _aggressive_ondemand: "false"
       _menunconfig: "false"
+      # Por defecto, ambas desactivadas; se ajustarán según modules_strategy
+      _modprobeddb: "false"
+      _kernel_on_diet: "false"
+      _modprobeddb_db_path: "/root/.config/modprobed.db"
 
     steps:
       - name: Preparar apt y dependencias base
@@ -58,6 +75,72 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Configurar versión, CPU y scheduler
+        id: cfg
+        shell: bash
+        run: |
+          echo "_version=${{ github.event.inputs.kernel_version }}" >> $GITHUB_ENV
+          echo "_processor_opt=${{ github.event.inputs.cpu_opt }}" >> $GITHUB_ENV
+
+          SCHED="${{ github.event.inputs.cpusched }}"
+          case "$SCHED" in
+            bore|eevdf|pds|bmq|cfs)
+              echo "_cpusched=$SCHED" >> $GITHUB_ENV
+              ;;
+            *)
+              echo "::error::cpusched inválido: $SCHED (usa bore|eevdf|pds|bmq|cfs)"
+              exit 1
+              ;;
+          esac
+
+      - name: Configurar estrategia de módulos
+        id: modestrat
+        shell: bash
+        run: |
+          STRAT="${{ github.event.inputs.modules_strategy }}"
+          case "$STRAT" in
+            modprobed)
+              if [ ! -f "modprobed.db" ]; then
+                echo "::error::modules_strategy=modprobed pero no existe ./modprobed.db en la raíz del repo"
+                exit 1
+              fi
+              mkdir -p /root/.config
+              cp modprobed.db /root/.config/modprobed.db
+              chmod 600 /root/.config/modprobed.db
+              echo "_modprobeddb=true"    >> $GITHUB_ENV
+              echo "_kernel_on_diet=false" >> $GITHUB_ENV
+              echo "mode=modprobed" >> $GITHUB_OUTPUT
+              ;;
+            diet)
+              echo "_kernel_on_diet=true"  >> $GITHUB_ENV
+              echo "_modprobeddb=false"    >> $GITHUB_ENV
+              echo "mode=diet" >> $GITHUB_OUTPUT
+              ;;
+            full)
+              echo "_kernel_on_diet=false" >> $GITHUB_ENV
+              echo "_modprobeddb=false"    >> $GITHUB_ENV
+              echo "mode=full" >> $GITHUB_OUTPUT
+              ;;
+            *)
+              echo "::error::modules_strategy inválida: $STRAT (usa modprobed | diet | full)"
+              exit 1
+              ;;
+          esac
+          echo "Estrategia de módulos: $STRAT"
+
+      - name: Mostrar configuración efectiva
+        run: |
+          echo "Kernel:        $_version"
+          echo "CPU opt:       $_processor_opt"
+          echo "Scheduler:      $_cpusched"
+          echo "Compiler:      $_compiler (LTO=$_lto_mode IAS=$_llvm_ias)"
+          echo "Gov:           $_default_cpu_gov"
+          echo "TCP:           $_tcp_cong_alg"
+          echo "Tickless:      $_tickless / HZ=$_timer_freq"
+          echo "Diet:          $_kernel_on_diet"
+          echo "modprobeddb:   $_modprobeddb (path $_modprobeddb_db_path)"
+          echo "menunconfig:   $_menunconfig"
 
       - name: Clonar linux-tkg
         run: |
@@ -81,7 +164,6 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          # Copiar .deb generados desde posibles ubicaciones
           find . -type f -name "*.deb" -exec cp -v {} dist/ \; || true
           find linux-tkg -type f -name "*.deb" -exec cp -v {} dist/ \; || true
           find .. -maxdepth 1 -type f -name "*.deb" -exec cp -v {} dist/ \; || true

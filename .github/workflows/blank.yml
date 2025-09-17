@@ -1,0 +1,96 @@
+name: Watch Linux Stable & Dispatch builds
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"   # cada 6h
+  workflow_dispatch: {}
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (guardar estado)
+        uses: actions/checkout@v4
+
+      - name: Herramientas
+        run: sudo apt-get update && sudo apt-get install -y jq curl
+
+      - name: Detectar última estable (no-EOL) de kernel.org y prefijar "v"
+        id: kver
+        shell: bash
+        run: |
+          set -euo pipefail
+          JSON="$(curl -fsSL https://www.kernel.org/releases.json)"
+          VER="$(printf '%s' "$JSON" \
+            | jq -r '[.releases[]
+                      | select(.moniker=="stable" and (.iseol|not))
+                      ] | max_by(.released.timestamp) | .version')"
+          if [ -z "${VER:-}" ] || [ "$VER" = "null" ]; then
+            echo "::error::No se pudo obtener versión estable no-EOL"; exit 1
+          fi
+          # Asegurar prefijo "v"
+          if [[ "$VER" =~ ^v ]]; then
+            VVER="$VER"
+          else
+            VVER="v$VER"
+          fi
+          echo "latest=$VVER" >> "$GITHUB_OUTPUT"
+          echo "Último estable (con v): $VVER"
+
+      - name: Comparar con estado previo
+        id: state
+        shell: bash
+        run: |
+          mkdir -p .state
+          PREV="$(cat .state/latest_kernel.txt 2>/dev/null || true)"
+          echo "prev=$PREV" >> "$GITHUB_OUTPUT"
+          if [ "$PREV" = "${{ steps.kver.outputs.latest }}" ]; then
+            echo "Sin cambios. Nada que disparar."
+            exit 0
+          fi
+          echo "${{ steps.kver.outputs.latest }}" > .state/latest_kernel.txt
+
+      - name: Guardar estado (commit)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .state/latest_kernel.txt
+          git commit -m "state: ${{ steps.kver.outputs.latest }}" || true
+          git push
+
+      # ===== Despachos (solo pasamos kernel_version; el resto usa defaults) =====
+      - name: Dispatch Zen3
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -fsSL -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/Linux-TKG-Bore-LLVM-BBR-Zen3.yml/dispatches \
+            -d '{"ref":"main","inputs":{"kernel_version":"'"${{ steps.kver.outputs.latest }}"'"}}'
+
+      - name: Dispatch TigerLake
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -fsSL -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/Linux-TKG-Bore-LLVM-BBR-TigerLake.yml/dispatches \
+            -d '{"ref":"main","inputs":{"kernel_version":"'"${{ steps.kver.outputs.latest }}"'"}}'
+
+      - name: Dispatch x86-64-v3
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -fsSL -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/Linux-TKG-Bore-LLVM-BBR-x86-64-v3.yml/dispatches \
+            -d '{"ref":"main","inputs":{"kernel_version":"'"${{ steps.kver.outputs.latest }}"'"}}'

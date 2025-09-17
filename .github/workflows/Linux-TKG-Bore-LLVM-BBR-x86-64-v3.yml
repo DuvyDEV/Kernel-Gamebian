@@ -108,7 +108,7 @@ jobs:
                 exit 1
               fi
               mkdir -p /root/.config
-              cp modprobed.db /root/.config/modprobed.db
+              cp modprobed/x86-64-v3/modprobed.db /root/.config/modprobed.db
               chmod 600 /root/.config/modprobed.db
               echo "_modprobeddb=true"     >> $GITHUB_ENV
               echo "_kernel_on_diet=false" >> $GITHUB_ENV

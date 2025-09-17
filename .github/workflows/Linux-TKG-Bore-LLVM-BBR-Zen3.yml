@@ -25,7 +25,7 @@ jobs:
       DEBIAN_FRONTEND: noninteractive
       # ====== Requisitos del usuario ======
       _distro: "Debian"
-      _version: "v6.16.7"             # kernel v6.16.7
+      _version: "v6.16.5"             # kernel v6.16.5
       _cpusched: "bore"
       _compiler: "llvm"              # usar clang/llvm
       _llvm_ias: "1"                 # assembler integrado LLVM
@@ -40,6 +40,7 @@ jobs:
       _acs_override: "false"
       _logging_use_script: "no"      # evitar problemas en CI
       _install_after_building: "no"
+      _menunconfig: "false"
 
     steps:
       - name: Preparar apt y dependencias base

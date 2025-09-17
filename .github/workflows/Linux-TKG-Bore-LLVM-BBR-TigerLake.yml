@@ -58,7 +58,7 @@ jobs:
       # Por defecto, ambas desactivadas; se ajustarán según modules_strategy
       _modprobeddb: "false"
       _kernel_on_diet: "false"
-      _modprobeddb_db_path: "/root/.config/modprobed.db"
+      _modprobeddb_db_path: "/root/.config/modprobed-tigerlake.db"
 
     steps:
       - name: Preparar apt y dependencias base

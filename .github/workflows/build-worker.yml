@@ -2,7 +2,7 @@ name: Watch Linux Stable & Dispatch builds
 
 on:
   schedule:
-    - cron: "0 */6 * * *"   # cada 6h
+    - cron: "0 * * * *"   # cada 1h
   workflow_dispatch: {}
 
 permissions:

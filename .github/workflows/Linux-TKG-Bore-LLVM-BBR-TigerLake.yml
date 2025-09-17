@@ -83,7 +83,7 @@ jobs:
         run: |
           echo "_version=${{ github.event.inputs.kernel_version }}" >> $GITHUB_ENV
           echo "_processor_opt=${{ github.event.inputs.cpu_opt }}" >> $GITHUB_ENV
-          echo "_kernel_localversion=-redroot-${{ github.event.inputs.cpu_opt }}" >> $GITHUB_ENV
+          echo "_kernel_localversion=redroot-${{ github.event.inputs.cpu_opt }}" >> $GITHUB_ENV
 
           SCHED="${{ github.event.inputs.cpusched }}"
           case "$SCHED" in

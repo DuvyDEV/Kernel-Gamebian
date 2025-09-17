@@ -20,7 +20,7 @@ on:
         default: "znver3"
         required: true
       kernel_version:
-        description: "Versión del kernel (p.e. v6.16.5)"
+        description: "Versión del kernel (p.e. v6.16.5 o 6.16-latest)"
         default: "6.16-latest"
         required: true
       cpusched:
@@ -77,12 +77,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Configurar versión, CPU y scheduler
+      - name: Configurar versión, CPU, scheduler y localversion
         id: cfg
         shell: bash
         run: |
           echo "_version=${{ github.event.inputs.kernel_version }}" >> $GITHUB_ENV
           echo "_processor_opt=${{ github.event.inputs.cpu_opt }}" >> $GITHUB_ENV
+          echo "_kernel_localversion=-redroot-${{ github.event.inputs.cpu_opt }}" >> $GITHUB_ENV
 
           SCHED="${{ github.event.inputs.cpusched }}"
           case "$SCHED" in
@@ -109,7 +110,7 @@ jobs:
               mkdir -p /root/.config
               cp modprobed.db /root/.config/modprobed.db
               chmod 600 /root/.config/modprobed.db
-              echo "_modprobeddb=true"    >> $GITHUB_ENV
+              echo "_modprobeddb=true"     >> $GITHUB_ENV
               echo "_kernel_on_diet=false" >> $GITHUB_ENV
               echo "mode=modprobed" >> $GITHUB_OUTPUT
               ;;
@@ -132,16 +133,18 @@ jobs:
 
       - name: Mostrar configuración efectiva
         run: |
-          echo "Kernel:        $_version"
-          echo "CPU opt:       $_processor_opt"
-          echo "Scheduler:      $_cpusched"
-          echo "Compiler:      $_compiler (LTO=$_lto_mode IAS=$_llvm_ias)"
-          echo "Gov:           $_default_cpu_gov"
-          echo "TCP:           $_tcp_cong_alg"
-          echo "Tickless:      $_tickless / HZ=$_timer_freq"
-          echo "Diet:          $_kernel_on_diet"
-          echo "modprobeddb:   $_modprobeddb (path $_modprobeddb_db_path)"
-          echo "menunconfig:   $_menunconfig"
+          echo "Kernel:         $_version"
+          echo "CPU opt:        $_processor_opt"
+          echo "Scheduler:       $_cpusched"
+          echo "Localversion:    $_kernel_localversion"
+          echo "Compiler:        $_compiler (LTO=$_lto_mode IAS=$_llvm_ias)"
+          echo "Gov:             $_default_cpu_gov"
+          echo "TCP:             $_tcp_cong_alg"
+          echo "Tickless:        $_tickless / HZ=$_timer_freq"
+          echo "Diet:            $_kernel_on_diet"
+          echo "modprobeddb:     $_modprobeddb (path $_modprobeddb_db_path)"
+          echo "menunconfig:     $_menunconfig"
+          echo "cmdline:         $_custom_commandline"
 
       - name: Clonar linux-tkg
         run: |

@@ -76,7 +76,7 @@ class RepoHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
 if __name__ == "__main__":
-    os.chdir(REPO_DIR)  # opcional: no imprescindible
+    os.chdir(REPO_DIR)
     httpd = ThreadingHTTPServer((HOST, PORT), RepoHandler)
     print(f"Serving APT repo on http://{HOST}:{PORT}/")
     httpd.serve_forever()

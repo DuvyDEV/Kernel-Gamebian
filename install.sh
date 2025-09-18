@@ -15,17 +15,20 @@ if [ "$CODENAME" != "trixie" ]; then
 fi
 echo "[*] Detectado Debian $CODENAME"
 
-# ===== 1) Habilitar contrib/non-free/non-free-firmware
-echo "[*] Habilitando contrib non-free non-free-firmware en /etc/apt/sources.list"
+# ===== 1) Repos oficiales (reescritura segura con contrib/non-free/non-free-firmware)
+echo "[*] Configurando repos oficiales con contrib/non-free/non-free-firmware"
 cp -a /etc/apt/sources.list{,.bak}
-awk '
-  /^deb / {
-    line=$0
-    if (line ~ /contrib|non-free|non-free-firmware/) { print line; next }
-    print line " contrib non-free non-free-firmware"; next
-  }
-  { print }
-' /etc/apt/sources.list.bak > /etc/apt/sources.list
+
+cat > /etc/apt/sources.list <<EOF
+deb http://deb.debian.org/debian ${CODENAME} main contrib non-free non-free-firmware
+deb-src http://deb.debian.org/debian ${CODENAME} main contrib non-free non-free-firmware
+
+deb http://security.debian.org/debian-security ${CODENAME}-security main contrib non-free non-free-firmware
+deb-src http://security.debian.org/debian-security ${CODENAME}-security main contrib non-free non-free-firmware
+
+deb http://deb.debian.org/debian ${CODENAME}-updates main contrib non-free non-free-firmware
+deb-src http://deb.debian.org/debian ${CODENAME}-updates main contrib non-free non-free-firmware
+EOF
 
 apt update
 

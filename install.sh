@@ -68,12 +68,32 @@ apt install -y \
   gnome-browser-connector gnome-text-editor gnome-disk-utility \
   gnome-shell-extension-prefs gnome-shell-extension-appindicator \
   gnome-shell-extension-dash-to-panel \
-  hydrapaper \
+  hydrapaper fastfetch htop \
   file-roller p7zip-full unrar zip unzip \
   fonts-noto fonts-noto-color-emoji fonts-noto-cjk fonts-noto-mono
 
-# Crear carpetas XDG para el usuario final
-runuser -l "$USERNAME" -c 'xdg-user-dirs-update'
+# Crear carpetas XDG para el usuario final (dinámico por locale) y evitar el prompt
+detect_user_locale() {
+  local l=""
+  # 1) Locale definido en AccountsService (si existe para el usuario)
+  if [ -f "/var/lib/AccountsService/users/$USERNAME" ]; then
+    l="$(awk -F= '/^Language=/{print $2}' /var/lib/AccountsService/users/$USERNAME | sed 's/\..*//')"
+  fi
+  # 2) /etc/default/locale
+  if [ -z "$l" ] && [ -f /etc/default/locale ]; then
+    l="$(awk -F= '/^LANG=/{print $2}' /etc/default/locale | sed 's/\..*//')"
+  fi
+  # 3) LANG del entorno del sistema en este momento
+  if [ -z "$l" ] && [ -n "${LANG:-}" ]; then
+    l="${LANG%%.*}"
+  fi
+  # 4) Fallback
+  echo "${l:-en_US}"
+}
+
+USER_LOCALE="$(detect_user_locale)"
+runuser -l "$USERNAME" -c "mkdir -p ~/.config; printf '%s\n' '${USER_LOCALE}' > ~/.config/user-dirs.locale"
+runuser -l "$USERNAME" -c "LANG='${USER_LOCALE}.UTF-8' xdg-user-dirs-update --force"
 
 # Habilitar arranque gráfico con GDM
 echo "[*] Habilitando GDM y target gráfico"
@@ -305,7 +325,7 @@ system-db:local
 EOF
 fi
 
-# Construir archivo de defaults
+# Defaults del sistema (se aplican en el próximo login)
 DCONF_FILE="/etc/dconf/db/local.d/00-redroot"
 {
   echo "[org/gnome/desktop/interface]"
@@ -319,14 +339,30 @@ DCONF_FILE="/etc/dconf/db/local.d/00-redroot"
     echo "document-font-name='Segoe UI 11'"
     echo "monospace-font-name='Noto Mono 10'"
   fi
+
   echo
   echo "[org/gnome/desktop/wm/preferences]"
   if [ "$APPLY_FONTS" -eq 1 ]; then
     echo "titlebar-font='Segoe UI Bold 11'"
   fi
+
+  # Alisado subpíxel (LCD)
+  echo
+  echo "[org/gnome/settings-daemon/plugins/xsettings]"
+  echo "antialiasing='rgba'"
+  echo "rgba-order='rgb'"
+
+  # Desactivar aceleración del ratón/touchpad
+  echo
+  echo "[org/gnome/desktop/peripherals/mouse]"
+  echo "accel-profile='flat'"
+
+  echo
+  echo "[org/gnome/desktop/peripherals/touchpad]"
+  echo "accel-profile='flat'"
 } > "$DCONF_FILE"
 
-# Aplicar base de datos de defaults
+# Actualizar la BD de dconf de sistema
 dconf update
 
 # Aplicación inmediata al usuario (Wayland-safe con dbus-run-session)
@@ -341,11 +377,16 @@ if [ "$APPLY_FONTS" -eq 1 ]; then
   runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface monospace-font-name 'Noto Mono 10'"
   runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.wm.preferences titlebar-font 'Segoe UI Bold 11'"
 fi
+# Subpíxel + desactivar aceleración
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.settings-daemon.plugins.xsettings antialiasing 'rgba'"
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.settings-daemon.plugins.xsettings rgba-order 'rgb'"
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.peripherals.mouse accel-profile 'flat'"
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.peripherals.touchpad accel-profile 'flat' || true"
 
 # ===== Limpieza final
 echo
 echo "[*] Realizando limpieza final"
-apt autoremove --purge -y malcontent* yelp* debian-reference* || true
+apt autoremove --purge -y malcontent* yelp* debian-reference* zutty* plymouth* || true
 apt clean
 apt autoclean
 echo "[*] Limpieza finalizada"

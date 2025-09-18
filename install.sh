@@ -170,19 +170,19 @@ else
   UI_SCHEME="prefer-dark"; GTK_THEME="Adwaita-dark"
 fi
 
-# ===== 6b) Microcode + firmware
-echo "[*] Instalando firmware-misc-nonfree y microcode según CPU"
+# ===== 6b) Microcode + firmware (ajustado)
+echo "[*] Instalando firmware (NVIDIA/MediaTek) y microcode según CPU"
 
-apt install -y firmware-misc-nonfree
+apt install -y firmware-nvidia-graphics firmware-mediatek
 
 CPU_VENDOR="$(LC_ALL=C lscpu | awk -F: '/Vendor ID:/ {gsub(/^[ \t]+/, "", $2); print $2}')"
 case "$CPU_VENDOR" in
   GenuineIntel)
-    echo "[*] CPU Intel detectada -> instalando intel-microcode"
-    apt install -y intel-microcode
+    echo "[*] CPU Intel detectada -> instalando microcode y firmware Intel"
+    apt install -y intel-microcode firmware-intel-graphics firmware-intel-misc
     ;;
   AuthenticAMD)
-    echo "[*] CPU AMD detectada -> instalando amd64-microcode"
+    echo "[*] CPU AMD detectada -> instalando microcode AMD"
     apt install -y amd64-microcode
     ;;
   *)
@@ -344,6 +344,21 @@ case "$GOPT" in
   3) install_discord; install_steam ;;
   *) echo "[*] Omitiendo instalación de Discord/Steam" ;;
 esac
+
+# ===== Fix para NetworkManager
+echo
+echo "[*] Corrigiendo configuración de NetworkManager"
+NMCONF="/etc/NetworkManager/NetworkManager.conf"
+if grep -q "^\[ifupdown\]" "$NMCONF"; then
+  sed -i 's/^managed=false/managed=true/' "$NMCONF"
+else
+  cat >> "$NMCONF" <<EOF
+
+[ifupdown]
+managed=true
+EOF
+fi
+systemctl restart NetworkManager || true
 
 # ===== 13) APLICAR CONFIG (robusto): defaults del sistema + aplicación inmediata al usuario
 echo "[*] Aplicando defaults de dconf (sistema) y ajustes para ${USERNAME}"

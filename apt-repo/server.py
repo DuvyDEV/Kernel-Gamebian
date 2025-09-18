@@ -4,7 +4,7 @@ from pathlib import Path
 import mimetypes, os
 
 REPO_DIR = Path("/var/www/debian-redroot")
-HOST = "0.0.0.0"   # si solo lo usará cloudflared en la misma red, puedes usar "127.0.0.1"
+HOST = "0.0.0.0"
 PORT = 8000
 
 # Tipos útiles para APT

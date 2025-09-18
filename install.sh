@@ -64,7 +64,7 @@ apt update
 # ===== 5) GNOME + utilidades solicitadas
 echo "[*] Instalando GNOME, utilidades y compresión"
 apt install -y \
-  gnome-shell gdm3 gnome-tweaks gnome-themes-extra \
+  gdm3 gnome-shell gnome-console gnome-tweaks gnome-themes-extra \
   ffmpegthumbnailer power-profiles-daemon seahorse eog \
   xdg-user-dirs xdg-user-dirs-gtk \
   xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-gtk \
@@ -316,6 +316,40 @@ case "$GOPT" in
   3) install_discord; install_steam ;;
   *) echo "[*] Omitiendo instalación de Discord/Steam" ;;
 esac
+
+# ===== Fix para NetworkManager
+echo
+echo "[*] Corrigiendo configuración de NetworkManager"
+NMCONF="/etc/NetworkManager/NetworkManager.conf"
+if grep -q "^\[ifupdown\]" "$NMCONF"; then
+  sed -i 's/^managed=false/managed=true/' "$NMCONF"
+else
+  cat >> "$NMCONF" <<EOF
+
+[ifupdown]
+managed=true
+EOF
+fi
+
+systemctl restart NetworkManager || true
+
+# ===== Limpieza final de paquetes innecesarios
+echo
+echo "[*] Realizando limpieza final"
+apt autoremove --purge -y malcontent* yelp* debian-reference* || true
+apt clean
+apt autoclean
+echo "[*] Limpieza finalizada"
+
+# ===== Preguntar por reinicio
+echo
+read -rp "¿Quieres reiniciar el sistema ahora? [s/N]: " REBOOT
+if [[ "${REBOOT:-N}" =~ ^[sS]$ ]]; then
+  echo "[*] Reiniciando..."
+  reboot
+else
+  echo "[*] Instalación finalizada, reinicia manualmente cuando lo desees."
+fi
 
 echo
 echo "======================================="

@@ -57,7 +57,7 @@ apt update
 
 # ===== 2) Utilidades básicas (incluye sudo)
 echo "[*] Instalando utilidades básicas"
-apt install -y git nano sudo wget curl ca-certificates gpg xdg-utils dconf-cli locales
+apt install -y git nano sudo wget curl ca-certificates gpg xdg-utils dconf-cli
 
 # ===== 3) Determinar usuario y agregarlo a sudo
 USERNAME="${SUDO_USER:-}"
@@ -97,46 +97,30 @@ apt install -y \
   file-roller p7zip-full unrar zip unzip \
   fonts-noto fonts-noto-color-emoji fonts-noto-cjk fonts-noto-mono
 
-# Crear carpetas XDG para el usuario final (dinámico por locale) y evitar el prompt
-detect_user_locale() {
-  local l=""
-  # 1) AccountsService (si existe para el usuario)
-  if [ -f "/var/lib/AccountsService/users/$USERNAME" ]; then
-    l="$(awk -F= '/^Language=/{print $2}' /var/lib/AccountsService/users/$USERNAME | sed 's/\..*//')"
-  fi
-  # 2) /etc/default/locale
-  if [ -z "$l" ] && [ -f /etc/default/locale ]; then
-    l="$(awk -F= '/^LANG=/{print $2}' /etc/default/locale | sed 's/\..*//')"
-  fi
-  # 3) LANG del entorno actual
-  if [ -z "$l" ] && [ -n "${LANG:-}" ]; then
-    l="${LANG%%.*}"
-  fi
-  echo "${l:-en_US}"
-}
-
-USER_LOCALE="$(detect_user_locale)"
-
-# Asegurar que el locale deseado existe y está activo en el sistema
-L="${USER_LOCALE}.UTF-8"
-if ! locale -a 2>/dev/null | grep -qi "^${L}$"; then
-  echo "[*] Generando locale ${L}"
-  # Descomentar o añadir en /etc/locale.gen y generar
-  sed -i "/^${USER_LOCALE}\.UTF-8/s/^# *//" /etc/locale.gen || true
-  grep -q "^${USER_LOCALE}\.UTF-8" /etc/locale.gen || echo "${USER_LOCALE}.UTF-8 UTF-8" >> /etc/locale.gen
-  locale-gen
+Obtener el locale del sistema
+if [ -f /etc/default/locale ]; then
+    SYS_LOCALE=$(awk -F= '/^LANG=/{print $2}' /etc/default/locale | tr -d '"')
+else
+    SYS_LOCALE="es_ES.UTF-8"
 fi
-update-locale LANG="${L}"
+SYS_LANG="${SYS_LOCALE%%.*}"
 
-# Dejar configurado para el usuario antes del primer login gráfico
-runuser -l "$USERNAME" -c "mkdir -p ~/.config && printf '%s\n' '${USER_LOCALE}' > ~/.config/user-dirs.locale"
-runuser -l "$USERNAME" -c "export LANG='${L}'; xdg-user-dirs-update --force"
-
-# Registrar idioma en AccountsService para ese usuario si el archivo existe
-if [ -f "/var/lib/AccountsService/users/$USERNAME" ]; then
-  sed -i '/^Language=/d' "/var/lib/AccountsService/users/$USERNAME"
-  printf 'Language=%s\n' "${L}" >> "/var/lib/AccountsService/users/$USERNAME"
+Asegurarse de que el paquete 'locales' esté instalado y el locale esté generado
+echo "[*] Verificando y generando locale '${SYS_LOCALE}'"
+if ! locale -a 2>/dev/null | grep -qi "^${SYS_LANG}\.utf-?8$"; then
+    apt-get update
+    apt-get install -y --no-install-recommends locales
+    sed -i -E "s/^#\s*(${SYS_LOCALE//./\\.})/\1/" /etc/locale.gen
+    locale-gen
 fi
+
+Escribir el idioma en el archivo de configuración del usuario
+echo "[*] Escribiendo el locale en ~/.config/user-dirs.locale"
+runuser -l "$USERNAME" -c "mkdir -p ~/.config && printf '%s\n' '${SYS_LANG}' > ~/.config/user-dirs.locale"
+
+Forzar la actualización de los nombres de las carpetas con el locale correcto
+echo "[*] Actualizando carpetas de usuario con xdg-user-dirs-update --force"
+runuser -l "$USERNAME" -c "LANG='${SYS_LOCALE}' xdg-user-dirs-update --force"
 
 # Habilitar arranque gráfico con GDM
 echo "[*] Habilitando GDM y target gráfico"

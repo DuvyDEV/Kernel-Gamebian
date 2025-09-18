@@ -16,7 +16,7 @@ on:
         default: "modprobed"
         required: true
       cpu_opt:
-        description: "Processor opt (p.e. znver3, x86-64-v3, tigerlake, native)"
+        description: "Processor opt (p.e. znver3, x86-64-v3, tigerlake)"
         default: "tigerlake"
         required: true
       kernel_version:
@@ -37,11 +37,6 @@ permissions:
 
 jobs:
   build:
-    # Serializa solo el paso de release por versión/tag; los builds compilan en paralelo entre runs.
-    concurrency:
-      group: release-${{ github.event.inputs.release_tag || format('linux-tkg-{0}', github.event.inputs.kernel_version) }}
-      cancel-in-progress: false
-
     runs-on: ubuntu-latest
     container:
       image: debian:13
@@ -80,6 +75,19 @@ jobs:
             clang lld llvm ccache libncurses-dev rsync \
             pkg-config file
           update-ca-certificates
+
+      - name: Instalar GitHub CLI (gh) para posibles reintentos de release
+        run: |
+          set -euo pipefail
+          if ! command -v gh >/dev/null 2>&1; then
+            curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+              | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg
+            chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg
+            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+              > /etc/apt/sources.list.d/github-cli.list
+            apt-get update
+            apt-get install -y gh
+          fi
 
       - name: Checkout (este repo)
         uses: actions/checkout@v4
@@ -222,12 +230,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+      # 1er intento: action oficial (puede fallar por carrera rara)
       - name: Crear/actualizar Release único (agrega assets)
         uses: softprops/action-gh-release@v2
         with:
-          # todos los runs de la misma versión de entrada comparten este tag
           tag_name: ${{ github.event.inputs.release_tag || format('linux-tkg-{0}', github.event.inputs.kernel_version) }}
-          # título informativo con la versión real empacada
           name: Linux-tkg ${{ steps.meta.outputs.version }}
           files: dist/*.deb
           draft: false
@@ -235,4 +242,26 @@ jobs:
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+      # Reintento robusto con gh: crea el release si no existe y sube assets
+      - name: Reintento de publicación con gh (si el paso anterior falló)
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${{ github.event.inputs.release_tag || format('linux-tkg-{0}', github.event.inputs.kernel_version) }}"
+          TITLE="Linux-tkg ${{ steps.meta.outputs.version }}"
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release '$TAG' no existe; creándolo…"
+            gh release create "$TAG" --title "$TITLE" --notes ""
+          else
+            echo "Release '$TAG' existe; actualizando…"
+          fi
+
+          echo "Subiendo assets (.deb)…"
+          gh release upload "$TAG" dist/*.deb --clobber
 

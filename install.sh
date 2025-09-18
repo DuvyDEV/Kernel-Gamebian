@@ -314,74 +314,42 @@ fi
 systemctl restart NetworkManager || true
 
 # ===== 13) APLICAR CONFIG (robusto): defaults del sistema + aplicación inmediata al usuario
-echo "[*] Aplicando defaults de dconf (sistema) y ajustes para ${USERNAME}"
+echo
+echo "[*] Aplicando defaults de GNOME (sistema) y ajustes para ${USERNAME}"
 
-# Crear perfil dconf si no existe
+# Crear override en /etc/dconf/db/local.d/
 install -d /etc/dconf/db/local.d
-if [ ! -f /etc/dconf/profile/user ]; then
-  cat >/etc/dconf/profile/user <<'EOF'
-user-db:user
-system-db:local
+cat > /etc/dconf/db/local.d/00-redroot <<EOF
+[org/gnome/desktop/interface]
+color-scheme='${UI_SCHEME}'
+gtk-theme='${GTK_THEME}'
+icon-theme='${APPLY_ICON_THEME:-Adwaita}'
+font-name='${SEGOE_FONT:-Cantarell 11}'
+document-font-name='${SEGOE_FONT:-Cantarell 11}'
+monospace-font-name='Noto Mono 10'
+titlebar-font='${SEGOE_TITLE_FONT:-Cantarell Bold 11}'
+font-antialiasing='rgba'
+
+[org/gnome/desktop/peripherals/mouse]
+accel-profile='flat'
 EOF
-fi
 
-# Defaults del sistema (se aplican en el próximo login)
-DCONF_FILE="/etc/dconf/db/local.d/00-redroot"
-{
-  echo "[org/gnome/desktop/interface]"
-  echo "color-scheme='${UI_SCHEME}'"
-  echo "gtk-theme='${GTK_THEME}'"
-  if [ -n "${APPLY_ICON_THEME}" ]; then
-    echo "icon-theme='${APPLY_ICON_THEME}'"
-  fi
-  if [ "$APPLY_FONTS" -eq 1 ]; then
-    echo "font-name='Segoe UI 11'"
-    echo "document-font-name='Segoe UI 11'"
-    echo "monospace-font-name='Noto Mono 10'"
-  fi
-
-  echo
-  echo "[org/gnome/desktop/wm/preferences]"
-  if [ "$APPLY_FONTS" -eq 1 ]; then
-    echo "titlebar-font='Segoe UI Bold 11'"
-  fi
-
-  # Alisado subpíxel (LCD)
-  echo
-  echo "[org/gnome/settings-daemon/plugins/xsettings]"
-  echo "antialiasing='rgba'"
-  echo "rgba-order='rgb'"
-
-  # Desactivar aceleración del ratón/touchpad
-  echo
-  echo "[org/gnome/desktop/peripherals/mouse]"
-  echo "accel-profile='flat'"
-
-  echo
-  echo "[org/gnome/desktop/peripherals/touchpad]"
-  echo "accel-profile='flat'"
-} > "$DCONF_FILE"
-
-# Actualizar la BD de dconf de sistema
 dconf update
 
-# Aplicación inmediata al usuario (Wayland-safe con dbus-run-session)
+# Aplicar inmediatamente para el usuario actual (robusto en GNOME >=47 / Wayland)
 runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface color-scheme '${UI_SCHEME}'"
 runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface gtk-theme '${GTK_THEME}'"
-if [ -n "${APPLY_ICON_THEME}" ]; then
+if [ -n "${APPLY_ICON_THEME:-}" ]; then
   runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface icon-theme '${APPLY_ICON_THEME}'"
 fi
-if [ "$APPLY_FONTS" -eq 1 ]; then
-  runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface font-name 'Segoe UI 11'"
-  runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface document-font-name 'Segoe UI 11'"
-  runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface monospace-font-name 'Noto Mono 10'"
-  runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.wm.preferences titlebar-font 'Segoe UI Bold 11'"
-fi
-# Subpíxel + desactivar aceleración
-runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.settings-daemon.plugins.xsettings antialiasing 'rgba'"
-runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.settings-daemon.plugins.xsettings rgba-order 'rgb'"
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface font-name '${SEGOE_FONT:-Cantarell 11}'"
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface document-font-name '${SEGOE_FONT:-Cantarell 11}'"
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface monospace-font-name 'Noto Mono 10'"
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.wm.preferences titlebar-font '${SEGOE_TITLE_FONT:-Cantarell Bold 11}'"
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface font-antialiasing 'rgba'"
+
+# Ratón sin aceleración
 runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.peripherals.mouse accel-profile 'flat'"
-runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.peripherals.touchpad accel-profile 'flat' || true"
 
 # ===== Limpieza final
 echo

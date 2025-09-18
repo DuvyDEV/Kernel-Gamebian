@@ -97,7 +97,7 @@ apt install -y \
   file-roller p7zip-full unrar zip unzip \
   fonts-noto fonts-noto-color-emoji fonts-noto-cjk fonts-noto-mono
 
-Obtener el locale del sistema
+# Obtener el locale del sistema
 if [ -f /etc/default/locale ]; then
     SYS_LOCALE=$(awk -F= '/^LANG=/{print $2}' /etc/default/locale | tr -d '"')
 else
@@ -105,7 +105,7 @@ else
 fi
 SYS_LANG="${SYS_LOCALE%%.*}"
 
-Asegurarse de que el paquete 'locales' esté instalado y el locale esté generado
+# Asegurarse de que el paquete 'locales' esté instalado y el locale esté generado
 echo "[*] Verificando y generando locale '${SYS_LOCALE}'"
 if ! locale -a 2>/dev/null | grep -qi "^${SYS_LANG}\.utf-?8$"; then
     apt-get update
@@ -114,11 +114,11 @@ if ! locale -a 2>/dev/null | grep -qi "^${SYS_LANG}\.utf-?8$"; then
     locale-gen
 fi
 
-Escribir el idioma en el archivo de configuración del usuario
+# Escribir el idioma en el archivo de configuración del usuario
 echo "[*] Escribiendo el locale en ~/.config/user-dirs.locale"
 runuser -l "$USERNAME" -c "mkdir -p ~/.config && printf '%s\n' '${SYS_LANG}' > ~/.config/user-dirs.locale"
 
-Forzar la actualización de los nombres de las carpetas con el locale correcto
+# Forzar la actualización de los nombres de las carpetas con el locale correcto
 echo "[*] Actualizando carpetas de usuario con xdg-user-dirs-update --force"
 runuser -l "$USERNAME" -c "LANG='${SYS_LOCALE}' xdg-user-dirs-update --force"
 
@@ -344,21 +344,6 @@ case "$GOPT" in
   3) install_discord; install_steam ;;
   *) echo "[*] Omitiendo instalación de Discord/Steam" ;;
 esac
-
-# ===== Fix para NetworkManager
-echo
-echo "[*] Corrigiendo configuración de NetworkManager"
-NMCONF="/etc/NetworkManager/NetworkManager.conf"
-if grep -q "^\[ifupdown\]" "$NMCONF"; then
-  sed -i 's/^managed=false/managed=true/' "$NMCONF"
-else
-  cat >> "$NMCONF" <<EOF
-
-[ifupdown]
-managed=true
-EOF
-fi
-systemctl restart NetworkManager || true
 
 # ===== 13) APLICAR CONFIG (robusto): defaults del sistema + aplicación inmediata al usuario
 echo "[*] Aplicando defaults de dconf (sistema) y ajustes para ${USERNAME}"

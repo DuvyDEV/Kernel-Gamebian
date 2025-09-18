@@ -314,6 +314,7 @@ mc44s803
 md4
 md_mod
 mdio
+mdio_bus
 mdio_devres
 mei
 mei_gsc
@@ -340,6 +341,7 @@ mt76x2_common
 mt76x2u
 mt7921_common
 mt7921e
+mt792x_lib
 mtd
 mxm_wmi
 nandcore
@@ -645,6 +647,7 @@ usbnet
 uvc
 uvcvideo
 v4l2_dv_timings
+vboxvideo
 veth
 vfat
 vfio
@@ -660,10 +663,8 @@ videobuf2_memops
 videobuf2_v4l2
 videobuf2_vmalloc
 videodev
-vmwgfx
-vboxvideo
-virtio_gpu
 virtio_blk
+virtio_gpu
 virtio_pci
 virtio_pci_legacy_dev
 virtio_pci_modern_dev
@@ -672,6 +673,7 @@ vivaldi_fmap
 vmw_vmci
 vmw_vsock_virtio_transport_common
 vmw_vsock_vmci_transport
+vmwgfx
 vsock
 vsock_loopback
 vxlan

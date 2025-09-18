@@ -36,7 +36,7 @@ GITHUB_API = "https://api.github.com"
 # =========================
 REDROOT_REPO = "RedrootDEV/Debian-RedRoot"   # <-- ajusta si cambia
 KERNEL_SUBDIR = "redroot-kernels"            # subcarpeta en pool/main
-CPU_PROFILES = ["znver3", "tigerlake", "x86-64-v3"]
+CPU_PROFILES = ["znver3", "tigerlake", "x86-64-v3", "x86-64"]
 
 # regex para nombres de assets (image/headers) - excluye dbg/libc
 KIMG_RE = re.compile(r"^linux-image-(?P<ver>[^_]+)-tkg-redroot-(?P<cpu>[^_]+)_.*amd64\.deb$")

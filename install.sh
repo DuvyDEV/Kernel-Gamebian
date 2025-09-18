@@ -15,7 +15,7 @@ if [ "$CODENAME" != "trixie" ]; then
 fi
 echo "[*] Detectado Debian $CODENAME"
 
-# ===== 1) Repos oficiales (reescritura segura con contrib/non-free/non-free-firmware)
+# ===== 1) Repos oficiales (reescritura segura + multiarch i386)
 echo "[*] Configurando repos oficiales con contrib/non-free/non-free-firmware"
 cp -a /etc/apt/sources.list{,.bak}
 
@@ -29,6 +29,9 @@ deb-src http://security.debian.org/debian-security ${CODENAME}-security main con
 deb http://deb.debian.org/debian ${CODENAME}-updates main contrib non-free non-free-firmware
 deb-src http://deb.debian.org/debian ${CODENAME}-updates main contrib non-free non-free-firmware
 EOF
+
+# Habilitar arquitectura i386 para compatibilidad (Steam, libs 32-bit)
+dpkg --add-architecture i386 2>/dev/null || true
 
 apt update
 
@@ -135,12 +138,14 @@ echo "== Selecciona kernel personalizado (redroot) =="
 echo "1) AMD Zen3 (znver3)"
 echo "2) Intel 11th Gen portátiles (tigerlake)"
 echo "3) x86-64-v3 (genérico CPUs modernas)"
-read -rp "Opción [1-3] (por defecto 3): " KOPT
-KOPT="${KOPT:-3}"
+echo "4) x86-64 (genérico)"
+read -rp "Opción [1-4] (por defecto 4): " KOPT
+KOPT="${KOPT:-4}"
 case "$KOPT" in
   1) KFLAV="znver3" ;;
   2) KFLAV="tigerlake" ;;
-  3|*) KFLAV="x86-64-v3" ;;
+  3) KFLAV="x86-64-v3" ;;
+  4|*) KFLAV="x86-64" ;;
 esac
 echo "[*] Instalando kernel linux-image-redroot-${KFLAV} + headers"
 apt install -y "linux-image-redroot-${KFLAV}" "linux-headers-redroot-${KFLAV}"
@@ -284,6 +289,33 @@ if [[ "${SEGOE:-N}" =~ ^[sS]$ ]]; then
     echo "[*] Tipografías aplicadas."
   fi
 fi
+
+# ===== 12) Opcional: Discord y/o Steam
+echo
+echo "== ¿Instalar Steam y/o Discord? =="
+echo "1) Solo Discord"
+echo "2) Solo Steam"
+echo "3) Ambos"
+echo "4) Ninguno (por defecto)"
+read -rp "Opción [1-4] (por defecto 4): " GOPT
+GOPT="${GOPT:-4}"
+
+install_discord() {
+  echo "[*] Instalando Discord"
+  apt install -y discord
+}
+
+install_steam() {
+  echo "[*] Instalando Steam"
+  apt install -y steam-installer
+}
+
+case "$GOPT" in
+  1) install_discord ;;
+  2) install_steam ;;
+  3) install_discord; install_steam ;;
+  *) echo "[*] Omitiendo instalación de Discord/Steam" ;;
+esac
 
 echo
 echo "======================================="

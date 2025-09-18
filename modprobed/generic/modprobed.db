@@ -665,6 +665,7 @@ videobuf2_vmalloc
 videodev
 virtio_blk
 virtio_gpu
+virtio_net
 virtio_pci
 virtio_pci_legacy_dev
 virtio_pci_modern_dev

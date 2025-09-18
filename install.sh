@@ -79,6 +79,38 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl set-default graphical.target || true
 fi
 
+# ===== 5c) Inicio de sesión automático (GDM)
+read -rp "¿Habilitar inicio de sesión automático en GDM para el usuario ${USERNAME}? [s/N]: " AUTOLOGIN
+if [[ "${AUTOLOGIN:-N}" =~ ^[sS]$ ]]; then
+  GDM_DAEMON_CONF="/etc/gdm3/daemon.conf"
+  echo "[*] Configurando autologin en ${GDM_DAEMON_CONF}"
+  cp -a "${GDM_DAEMON_CONF}"{,.bak}
+
+  if grep -q '^\[daemon\]' "${GDM_DAEMON_CONF}"; then
+    # Asegurar/ajustar claves dentro de [daemon]
+    if grep -qE '^[#\s]*AutomaticLoginEnable\s*=' "${GDM_DAEMON_CONF}"; then
+      sed -i -E "s/^[#\s]*AutomaticLoginEnable\s*=.*/AutomaticLoginEnable=true/" "${GDM_DAEMON_CONF}"
+    else
+      sed -i "/^\[daemon\]/a AutomaticLoginEnable=true" "${GDM_DAEMON_CONF}"
+    fi
+    if grep -qE '^[#\s]*AutomaticLogin\s*=' "${GDM_DAEMON_CONF}"; then
+      sed -i -E "s/^[#\s]*AutomaticLogin\s*=.*/AutomaticLogin=${USERNAME}/" "${GDM_DAEMON_CONF}"
+    else
+      sed -i "/^\[daemon\]/a AutomaticLogin=${USERNAME}" "${GDM_DAEMON_CONF}"
+    fi
+  else
+    cat >> "${GDM_DAEMON_CONF}" <<EOF
+
+[daemon]
+AutomaticLoginEnable=true
+AutomaticLogin=${USERNAME}
+EOF
+  fi
+
+  echo "[*] Autologin habilitado para ${USERNAME}. (Copia de seguridad en daemon.conf.bak)"
+  echo "    Nota: esto reduce la seguridad física; desactívalo editando ${GDM_DAEMON_CONF}."
+fi
+
 # ===== 6) Preferencia de Modo (Oscuro/Claro) para GNOME
 echo
 echo "== Preferencia de apariencia =="

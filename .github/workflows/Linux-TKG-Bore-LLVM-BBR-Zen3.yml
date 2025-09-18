@@ -54,7 +54,7 @@ jobs:
       _install_after_building: "no"
       _aggressive_ondemand: "false"
       _menunconfig: "false"
-      _custom_commandline: "quiet loglevel=3 systemd.show_status=auto udev.log_priority=3 amd_pstate=active intel_pstate=active nowatchdog nmi_watchdog=0 kernel.split_lock_mitigate=0 mitigations=off"
+      _custom_commandline: "quiet loglevel=3 systemd.show_status=auto udev.log_priority=3 amd_pstate=active nowatchdog nmi_watchdog=0 kernel.split_lock_mitigate=0 mitigations=off"
       # Por defecto, ambas desactivadas; se ajustarán según modules_strategy
       _modprobeddb: "false"
       _kernel_on_diet: "false"

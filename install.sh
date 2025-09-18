@@ -15,6 +15,28 @@ if [ "$CODENAME" != "trixie" ]; then
 fi
 echo "[*] Detectado Debian $CODENAME"
 
+# ===== Verificar Secure Boot (robusto: mokutil o efivars)
+secureboot_enabled() {
+  if command -v mokutil >/dev/null 2>&1; then
+    mokutil --sb-state 2>/dev/null | grep -qi 'enabled' && return 0
+  fi
+  # Lectura directa desde efivars: 5º byte (tras 4 bytes de atributos) vale 0x01 si está habilitado
+  local efivar
+  efivar="$(ls /sys/firmware/efi/efivars/SecureBoot-* 2>/dev/null | head -n1)"
+  if [ -n "$efivar" ]; then
+    local val
+    val="$(od -An -tx1 -j4 -N1 "$efivar" 2>/dev/null | tr -d ' \n')"
+    [ "$val" = "01" ] && return 0
+  fi
+  return 1
+}
+
+if secureboot_enabled; then
+  echo "[!] Secure Boot está ACTIVO. Este script requiere Secure Boot desactivado."
+  echo "    Desactívalo en la BIOS/UEFI y vuelve a ejecutar."
+  exit 1
+fi
+
 # ===== 1) Repos oficiales (reescritura segura + multiarch i386)
 echo "[*] Configurando repos oficiales con contrib/non-free/non-free-firmware"
 cp -a /etc/apt/sources.list{,.bak}
@@ -35,7 +57,7 @@ apt update
 
 # ===== 2) Utilidades básicas (incluye sudo)
 echo "[*] Instalando utilidades básicas"
-apt install -y git nano sudo wget curl ca-certificates gpg xdg-utils dconf-cli
+apt install -y git nano sudo wget curl ca-certificates gpg xdg-utils dconf-cli locales
 
 # ===== 3) Determinar usuario y agregarlo a sudo
 USERNAME="${SUDO_USER:-}"
@@ -46,6 +68,9 @@ if [ -z "${USERNAME}" ]; then
   else
     read -rp "Ingresa el NOMBRE_DE_USUARIO para agregar al grupo sudo: " USERNAME
   fi
+fi
+if ! id -u "$USERNAME" >/dev/null 2>&1; then
+  echo "[!] El usuario '$USERNAME' no existe en el sistema."; exit 1
 fi
 echo "[*] Agregando ${USERNAME} al grupo sudo"
 usermod -a -G sudo "$USERNAME"
@@ -75,7 +100,7 @@ apt install -y \
 # Crear carpetas XDG para el usuario final (dinámico por locale) y evitar el prompt
 detect_user_locale() {
   local l=""
-  # 1) Locale definido en AccountsService (si existe para el usuario)
+  # 1) AccountsService (si existe para el usuario)
   if [ -f "/var/lib/AccountsService/users/$USERNAME" ]; then
     l="$(awk -F= '/^Language=/{print $2}' /var/lib/AccountsService/users/$USERNAME | sed 's/\..*//')"
   fi
@@ -83,17 +108,35 @@ detect_user_locale() {
   if [ -z "$l" ] && [ -f /etc/default/locale ]; then
     l="$(awk -F= '/^LANG=/{print $2}' /etc/default/locale | sed 's/\..*//')"
   fi
-  # 3) LANG del entorno del sistema en este momento
+  # 3) LANG del entorno actual
   if [ -z "$l" ] && [ -n "${LANG:-}" ]; then
     l="${LANG%%.*}"
   fi
-  # 4) Fallback
   echo "${l:-en_US}"
 }
 
 USER_LOCALE="$(detect_user_locale)"
-runuser -l "$USERNAME" -c "mkdir -p ~/.config; printf '%s\n' '${USER_LOCALE}' > ~/.config/user-dirs.locale"
-runuser -l "$USERNAME" -c "LANG='${USER_LOCALE}.UTF-8' xdg-user-dirs-update --force"
+
+# Asegurar que el locale deseado existe y está activo en el sistema
+L="${USER_LOCALE}.UTF-8"
+if ! locale -a 2>/dev/null | grep -qi "^${L}$"; then
+  echo "[*] Generando locale ${L}"
+  # Descomentar o añadir en /etc/locale.gen y generar
+  sed -i "/^${USER_LOCALE}\.UTF-8/s/^# *//" /etc/locale.gen || true
+  grep -q "^${USER_LOCALE}\.UTF-8" /etc/locale.gen || echo "${USER_LOCALE}.UTF-8 UTF-8" >> /etc/locale.gen
+  locale-gen
+fi
+update-locale LANG="${L}"
+
+# Dejar configurado para el usuario antes del primer login gráfico
+runuser -l "$USERNAME" -c "mkdir -p ~/.config && printf '%s\n' '${USER_LOCALE}' > ~/.config/user-dirs.locale"
+runuser -l "$USERNAME" -c "export LANG='${L}'; xdg-user-dirs-update --force"
+
+# Registrar idioma en AccountsService para ese usuario si el archivo existe
+if [ -f "/var/lib/AccountsService/users/$USERNAME" ]; then
+  sed -i '/^Language=/d' "/var/lib/AccountsService/users/$USERNAME"
+  printf 'Language=%s\n' "${L}" >> "/var/lib/AccountsService/users/$USERNAME"
+fi
 
 # Habilitar arranque gráfico con GDM
 echo "[*] Habilitando GDM y target gráfico"
@@ -142,6 +185,26 @@ if [ "$THEMEOPT" = "2" ]; then
 else
   UI_SCHEME="prefer-dark"; GTK_THEME="Adwaita-dark"
 fi
+
+# ===== 6b) Microcode + firmware
+echo "[*] Instalando firmware-misc-nonfree y microcode según CPU"
+
+apt install -y firmware-misc-nonfree
+
+CPU_VENDOR="$(LC_ALL=C lscpu | awk -F: '/Vendor ID:/ {gsub(/^[ \t]+/, "", $2); print $2}')"
+case "$CPU_VENDOR" in
+  GenuineIntel)
+    echo "[*] CPU Intel detectada -> instalando intel-microcode"
+    apt install -y intel-microcode
+    ;;
+  AuthenticAMD)
+    echo "[*] CPU AMD detectada -> instalando amd64-microcode"
+    apt install -y amd64-microcode
+    ;;
+  *)
+    echo "[!] No se detectó Intel ni AMD, se omite microcode"
+    ;;
+esac
 
 # ===== 7) Kernel personalizado (redroot) + update-grub
 echo

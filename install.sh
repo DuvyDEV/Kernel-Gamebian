@@ -193,18 +193,67 @@ esac
 # ===== 7) Kernel personalizado (redroot) + update-grub
 echo
 echo "== Selecciona kernel personalizado (redroot) =="
-echo "1) AMD Zen3 (znver3)"
-echo "2) Intel 11th Gen portátiles (tigerlake)"
-echo "3) x86-64-v3 (genérico CPUs modernas)"
-echo "4) x86-64 (genérico)"
-read -rp "Opción [1-4] (por defecto 4): " KOPT
-KOPT="${KOPT:-4}"
+echo "1)  x86-64 (Baseline genérico)"
+echo "2)  x86-64-v2 (CPUs ~2008+)"
+echo "3)  x86-64-v3 (CPUs ~2013+)"
+echo "4)  x86-64-v4 (Intel Skylake+, AMD Zen4+)"
+echo "5)  znver1 (Ryzen 1000/2000, EPYC 7001)"
+echo "6)  znver2 (Ryzen 3000/4000, EPYC 7002)"
+echo "7)  znver3 (Ryzen 5000/6000, EPYC 7003)"
+echo "8)  znver4 (Ryzen 7000/8000, EPYC 9004)"
+echo "9)  znver5 (Ryzen 9000, EPYC 9005)"
+echo "10) skylake (Intel 6ª a 9ª gen Desktop)"
+echo "11) icelake-client (Intel 10ª gen Desktop)"
+echo "12) tigerlake (Intel 11ª gen Portátiles)"
+echo "13) rocketlake (Intel 11ª gen Desktop)"
+echo "14) alderlake (Intel 12ª gen)"
+echo "15) raptorlake (Intel 13ª/14ª gen)"
+echo "16) arrowlake (Intel Core Ultra 200 Laptop)"
+echo "17) arrowlake-s (Intel Core Ultra 200 Desktop)"
+echo "18) meteorlake (Intel Core Ultra 100 Laptop)"
+echo "19) lunarlake (Intel Core Ultra 200V Laptop)"
+echo "20) auto-x86-64 (detecta automáticamente v2/v3/v4 según CPU)"
+read -rp "Opción [1-20] (por defecto 1): " KOPT
+KOPT="${KOPT:-1}"
+
 case "$KOPT" in
-  1) KFLAV="znver3" ;;
-  2) KFLAV="tigerlake" ;;
-  3) KFLAV="x86-64-v3" ;;
-  4|*) KFLAV="x86-64" ;;
+  1)  KFLAV="x86-64" ;;
+  2)  KFLAV="x86-64-v2" ;;
+  3)  KFLAV="x86-64-v3" ;;
+  4)  KFLAV="x86-64-v4" ;;
+  5)  KFLAV="znver1" ;;
+  6)  KFLAV="znver2" ;;
+  7)  KFLAV="znver3" ;;
+  8)  KFLAV="znver4" ;;
+  9)  KFLAV="znver5" ;;
+  10) KFLAV="skylake" ;;
+  11) KFLAV="icelake-client" ;;
+  12) KFLAV="tigerlake" ;;
+  13) KFLAV="rocketlake" ;;
+  14) KFLAV="alderlake" ;;
+  15) KFLAV="raptorlake" ;;
+  16) KFLAV="arrowlake" ;;
+  17) KFLAV="arrowlake-s" ;;
+  18) KFLAV="meteorlake" ;;
+  19) KFLAV="lunarlake" ;;
+  20)
+    echo "[*] Detectando el nivel de arquitectura x86-64..."
+    cpu_flags=$(lscpu)
+
+    if echo "$cpu_flags" | grep -E -q "\bavx512f\b"; then
+        KFLAV="x86-64-v4"
+    elif echo "$cpu_flags" | grep -E -q "\bavx2\b" && echo "$cpu_flags" | grep -E -q "\bavx\b"; then
+        KFLAV="x86-64-v3"
+    elif echo "$cpu_flags" | grep -E -q "\bpopcnt\b" && echo "$cpu_flags" | grep -E -q "\bsse4_2\b"; then
+        KFLAV="x86-64-v2"
+    else
+        KFLAV="x86-64"
+    fi
+    echo "[*] Nivel detectado: $KFLAV"
+    ;;
+  *)  KFLAV="x86-64" ;;
 esac
+
 echo "[*] Instalando kernel linux-image-redroot-${KFLAV} + headers"
 apt install -y "linux-image-redroot-${KFLAV}" "linux-headers-redroot-${KFLAV}"
 echo "[*] Regenerando configuración de GRUB"

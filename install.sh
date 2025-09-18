@@ -57,7 +57,7 @@ apt update
 
 # ===== 2) Utilidades básicas (incluye sudo)
 echo "[*] Instalando utilidades básicas"
-apt install -y git nano sudo wget curl ca-certificates gpg xdg-utils dconf-cli
+apt install -y git nano sudo wget curl ca-certificates gpg xdg-utils dconf-cli python3-minimal
 
 # ===== 3) Determinar usuario y agregarlo a sudo
 USERNAME="${SUDO_USER:-}"
@@ -128,6 +128,16 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl enable gdm3 || true
   systemctl set-default graphical.target || true
 fi
+
+# === UUIDs de extensiones (detección robusta) ===
+# AppIndicator puede venir como ubuntu-appindicators@ubuntu.com (algunos builds) o gcampax (Debian puro)
+if [ -d "/usr/share/gnome-shell/extensions/ubuntu-appindicators@ubuntu.com" ]; then
+  APPINDICATOR_UUID="ubuntu-appindicators@ubuntu.com"
+else
+  APPINDICATOR_UUID="appindicatorsupport@gnome-shell-extensions.gcampax.github.com"
+fi
+# Dash to Panel (paquete Debian)
+DASH2P_UUID="dash-to-panel@jderose9.github.com"
 
 # ===== 5c) Inicio de sesión automático (GDM)
 read -rp "¿Habilitar inicio de sesión automático en GDM para el usuario ${USERNAME}? [s/N]: " AUTOLOGIN
@@ -453,6 +463,16 @@ DCONF_FILE="/etc/dconf/db/local.d/00-redroot"
   echo
   echo "[org/gnome/desktop/peripherals/touchpad]"
   echo "accel-profile='flat'"
+
+  # === Fondo por defecto para todos los usuarios ===
+  echo
+  echo "[org/gnome/desktop/background]"
+  echo "picture-uri='file:///usr/share/backgrounds/redroot/default.png'"
+  echo "picture-uri-dark='file:///usr/share/backgrounds/redroot/default.png'"
+  
+  echo
+  echo "[org/gnome/shell]"
+  echo "enabled-extensions=['${APPINDICATOR_UUID}','${DASH2P_UUID}']"
 } > "$DCONF_FILE"
 
 # Actualizar la BD de dconf de sistema
@@ -477,6 +497,35 @@ fi
 # Ratón/touchpad sin aceleración
 runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.peripherals.mouse accel-profile 'flat'"
 runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.peripherals.touchpad accel-profile 'flat' || true"
+
+# === Activar extensiones para el usuario actual ===
+# 1) Intentar con el CLI oficial (si existe)
+runuser -l "$USERNAME" -c "dbus-run-session bash -lc '
+if command -v gnome-extensions >/dev/null 2>&1; then
+  gnome-extensions enable \"${APPINDICATOR_UUID}\" || true
+  gnome-extensions enable \"${DASH2P_UUID}\" || true
+else
+  # 2) Fallback sin CLI: fusionar vía gsettings usando python3
+  U1=\"${APPINDICATOR_UUID}\" U2=\"${DASH2P_UUID}\" python3 - <<\"PY\"
+import ast, os, subprocess
+uuids = [os.environ.get(\"U1\",\"\"), os.environ.get(\"U2\",\"\")]
+cur = subprocess.check_output(
+    [\"gsettings\",\"get\",\"org.gnome.shell\",\"enabled-extensions\"],
+    text=True
+).strip()
+try:
+    arr = list(ast.literal_eval(cur))
+except Exception:
+    arr = []
+for u in uuids:
+    if u and u not in arr:
+        arr.append(u)
+# gsettings espera comillas simples para strings
+val = \"[\" + \", \".join(\"'\"+x+\"'\" for x in arr) + \"]\"
+subprocess.check_call([\"gsettings\",\"set\",\"org.gnome.shell\",\"enabled-extensions\", val])
+PY
+fi
+'"
 
 # ===== Wallpaper personalizado (GNOME + GRUB)
 echo "[*] Descargando y configurando wallpaper personalizado"
@@ -511,7 +560,7 @@ else
   echo "GRUB_TIMEOUT=3" >> "$GRUB_FILE"
 fi
 
-echo "[*] Regenerando configuración de GRUB oculto y ccon nuevo fondo"
+echo "[*] Regenerando configuración de GRUB oculto y con nuevo fondo"
 update-grub || true
 
 # ===== Limpieza final

@@ -15,7 +15,7 @@ mimetypes.add_type("text/plain", ".InRelease")
 mimetypes.add_type("text/plain", ".Release")
 
 ALLOWED_PREFIXES = ("/dists/", "/pool/")
-ALLOWED_FILES = ("/KEY.asc", "/apt-ftparchive.conf", "/")  # "/" solo para ver raíz si quieres (puedes quitarlo)
+ALLOWED_FILES = ("/KEY.asc", "/apt-ftparchive.conf", "/")
 
 class RepoHandler(SimpleHTTPRequestHandler):
     # Minimiza banner del servidor

@@ -1,4 +1,4 @@
-name: Linux-TKG-Bore-LLVM-BBR-x86-64-v3 (Debian 13 container)
+name: Linux-TKG-Bore-LLVM-BBR (Debian 13 container)
 
 on:
   workflow_dispatch:
@@ -17,7 +17,7 @@ on:
         required: true
       cpu_opt:
         description: "Processor opt (p.e. znver3, x86-64-v3, tigerlake, native)"
-        default: "x86-64-v3"
+        default: "tigerlake"
         required: true
       kernel_version:
         description: "Versión del kernel (p.e. v6.16.5 o 6.16-latest)"
@@ -27,12 +27,21 @@ on:
         description: "Scheduler: bore | eevdf | pds | bmq | cfs"
         default: "bore"
         required: true
+      custom_cmdline:
+        description: "Kernel cmdline personalizado (vacío = default recomendado)"
+        default: ""
+        required: false
 
 permissions:
   contents: write
 
 jobs:
   build:
+    # Serializa solo el paso de release por versión/tag; los builds compilan en paralelo entre runs.
+    concurrency:
+      group: release-${{ github.event.inputs.release_tag || format('linux-tkg-{0}', github.event.inputs.kernel_version) }}
+      cancel-in-progress: false
+
     runs-on: ubuntu-latest
     container:
       image: debian:13
@@ -54,7 +63,7 @@ jobs:
       _install_after_building: "no"
       _aggressive_ondemand: "false"
       _menunconfig: "false"
-      _custom_commandline: "quiet loglevel=3 systemd.show_status=auto udev.log_priority=3 amd_pstate=active intel_pstate=active nowatchdog nmi_watchdog=0 kernel.split_lock_mitigate=0 mitigations=off"
+      _custom_commandline: ""   # se setea en runtime
       # Por defecto, ambas desactivadas; se ajustarán según modules_strategy
       _modprobeddb: "false"
       _kernel_on_diet: "false"
@@ -96,6 +105,13 @@ jobs:
               ;;
           esac
 
+          # === CMDLINE desde input (fallback al default) ===
+          CMDLINE="${{ github.event.inputs.custom_cmdline }}"
+          if [ -z "$CMDLINE" ]; then
+            CMDLINE='quiet loglevel=3 systemd.show_status=auto udev.log_priority=3 intel_pstate=active nowatchdog nmi_watchdog=0 kernel.split_lock_mitigate=0 mitigations=off'
+          fi
+          echo "_custom_commandline=$CMDLINE" >> $GITHUB_ENV
+
       - name: Configurar estrategia de módulos
         id: modestrat
         shell: bash
@@ -103,14 +119,25 @@ jobs:
           STRAT="${{ github.event.inputs.modules_strategy }}"
           case "$STRAT" in
             modprobed)
-              # Usa un modprobed.db por CPU: modprobed/<cpu_opt>/modprobed.db
-              DB_PATH="modprobed/${{ github.event.inputs.cpu_opt }}/modprobed.db"
-              if [ ! -f "$DB_PATH" ]; then
-                echo "::error::modules_strategy=modprobed pero no existe $DB_PATH en el repo"
+              # Preferente: modprobed/<cpu_opt>/modprobed.db
+              # Fallback:   modprobed/generic/modprobed.db
+              CPU_DIR="modprobed/${{ github.event.inputs.cpu_opt }}"
+              CPU_DB="$CPU_DIR/modprobed.db"
+              GEN_DB="modprobed/generic/modprobed.db"
+
+              if [ -f "$CPU_DB" ]; then
+                SRC_DB="$CPU_DB"
+                echo "Usando modprobed específico: $CPU_DB"
+              elif [ -f "$GEN_DB" ]; then
+                SRC_DB="$GEN_DB"
+                echo "No existe modprobed para CPU '${{ github.event.inputs.cpu_opt }}'. Usando genérico: $GEN_DB"
+              else
+                echo "::error::modules_strategy=modprobed pero no existe ni $CPU_DB ni $GEN_DB en el repo"
                 exit 1
               fi
+
               mkdir -p /root/.config
-              cp "$DB_PATH" /root/.config/modprobed.db
+              cp "$SRC_DB" /root/.config/modprobed.db
               chmod 600 /root/.config/modprobed.db
               echo "_modprobeddb=true"      >> $GITHUB_ENV
               echo "_kernel_on_diet=false"  >> $GITHUB_ENV
@@ -170,16 +197,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          find . -type f -name "*.deb" -exec cp -v {} dist/ \; || true
-          find linux-tkg -type f -name "*.deb" -exec cp -v {} dist/ \; || true
-          find .. -maxdepth 1 -type f -name "*.deb" -exec cp -v {} dist/ \; || true
+          # evita re-copiar desde dist
+          find . -type f -name "*.deb" -not -path "./dist/*" -exec cp -v {} dist/ \; || true
           if [ -z "$(ls -A dist/*.deb 2>/dev/null)" ]; then
             echo "No se encontraron .deb"; exit 1
           fi
           echo "Paquetes encontrados:"
           ls -lh dist
 
-      - name: Extraer versión (para nombrar release)
+      - name: Extraer versión (para nombre de artifact)
         id: meta
         shell: bash
         run: |
@@ -191,18 +217,22 @@ jobs:
       - name: Subir artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: linux-tkg-amd64-${{ steps.meta.outputs.version }}
+          name: linux-tkg-${{ env._processor_opt }}-${{ steps.meta.outputs.version }}
           path: dist/*.deb
           if-no-files-found: error
           retention-days: 7
 
-      - name: Crear Release y adjuntar .deb
+      - name: Crear/actualizar Release único (agrega assets)
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.release_tag || format('linux-tkg-{0}', steps.meta.outputs.version) }}
+          # todos los runs de la misma versión de entrada comparten este tag
+          tag_name: ${{ github.event.inputs.release_tag || format('linux-tkg-{0}', github.event.inputs.kernel_version) }}
+          # título informativo con la versión real empacada
           name: Linux-tkg ${{ steps.meta.outputs.version }}
           files: dist/*.deb
           draft: false
           prerelease: false
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

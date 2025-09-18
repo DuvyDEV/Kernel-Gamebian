@@ -429,6 +429,42 @@ fi
 runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.peripherals.mouse accel-profile 'flat'"
 runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.peripherals.touchpad accel-profile 'flat' || true"
 
+# ===== Wallpaper personalizado (GNOME + GRUB)
+echo "[*] Descargando y configurando wallpaper personalizado"
+WALLPAPER_DIR="/usr/share/backgrounds/redroot"
+WALLPAPER_FILE="${WALLPAPER_DIR}/default.png"
+
+install -d "$WALLPAPER_DIR"
+wget -qO "$WALLPAPER_FILE" "https://raw.githubusercontent.com/RedrootDEV/Debian-RedRoot/refs/heads/main/configs/default.png"
+
+# Establecer wallpaper en GNOME para el usuario
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.background picture-uri 'file://$WALLPAPER_FILE'"
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.background picture-uri-dark 'file://$WALLPAPER_FILE'"
+
+# Configurar el fondo en GRUB
+GRUB_FILE="/etc/default/grub"
+if grep -q '^GRUB_BACKGROUND=' "$GRUB_FILE"; then
+  sed -i "s|^GRUB_BACKGROUND=.*|GRUB_BACKGROUND=\"$WALLPAPER_FILE\"|" "$GRUB_FILE"
+else
+  echo "GRUB_BACKGROUND=\"$WALLPAPER_FILE\"" >> "$GRUB_FILE"
+fi
+
+# Configurar GRUB oculto pero accesible con ESC
+if grep -q '^GRUB_TIMEOUT_STYLE=' "$GRUB_FILE"; then
+  sed -i "s|^GRUB_TIMEOUT_STYLE=.*|GRUB_TIMEOUT_STYLE=hidden|" "$GRUB_FILE"
+else
+  echo "GRUB_TIMEOUT_STYLE=hidden" >> "$GRUB_FILE"
+fi
+
+if grep -q '^GRUB_TIMEOUT=' "$GRUB_FILE"; then
+  sed -i "s|^GRUB_TIMEOUT=.*|GRUB_TIMEOUT=3|" "$GRUB_FILE"
+else
+  echo "GRUB_TIMEOUT=3" >> "$GRUB_FILE"
+fi
+
+echo "[*] Regenerando configuración de GRUB oculto y ccon nuevo fondo"
+update-grub || true
+
 # ===== Limpieza final
 echo
 echo "[*] Realizando limpieza final"

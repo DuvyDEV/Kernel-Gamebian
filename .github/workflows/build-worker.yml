@@ -17,7 +17,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Herramientas
-        run: sudo apt-get update && sudo apt-get install -y jq curl
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq curl
 
       - name: Detectar última estable (no-EOL) de kernel.org y prefijar "v"
         id: kver
@@ -44,6 +46,7 @@ jobs:
         id: state
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p .state
           PREV="$(cat .state/latest_kernel.txt 2>/dev/null || true)"
           PREV="$(printf '%s' "$PREV" | tr -d '\r\n')"
@@ -64,53 +67,84 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .state/latest_kernel.txt
           git commit -m "state: ${{ steps.kver.outputs.latest }}" || true
           git push
 
-      # ===== Despachos (solo pasamos kernel_version; el resto usa defaults) =====
-      - name: Dispatch Zen3
+      # ===== Despacho único al workflow genérico, variando cpu_opt y cmdline =====
+      - name: Dispatch variantes
         if: steps.state.outputs.dispatch == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          KVER: ${{ steps.kver.outputs.latest }}
+        shell: bash
         run: |
-          curl -fsSL -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/Linux-TKG-Bore-LLVM-BBR-Zen3.yml/dispatches \
-            -d '{"ref":"main","inputs":{"kernel_version":"'"${{ steps.kver.outputs.latest }}"'"}}'
+          set -euo pipefail
 
-      - name: Dispatch TigerLake
-        if: steps.state.outputs.dispatch == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          curl -fsSL -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/Linux-TKG-Bore-LLVM-BBR-TigerLake.yml/dispatches \
-            -d '{"ref":"main","inputs":{"kernel_version":"'"${{ steps.kver.outputs.latest }}"'"}}'
+          # Plataformas soportadas (sin 'native')
+          CPU_OPTS=(
+            "x86-64" "x86-64-v2" "x86-64-v3" "x86-64-v4"
+            "znver1" "znver2" "znver3" "znver4" "znver5"
+            "skylake" "tigerlake" "icelake-client"
+            "rocketlake" "alderlake" "raptorlake"
+            "meteorlake" "arrowlake" "arrowlake-s" "lunarlake"
+          )
 
-      - name: Dispatch x86-64-v3
-        if: steps.state.outputs.dispatch == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          curl -fsSL -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/Linux-TKG-Bore-LLVM-BBR-x86-64-v3.yml/dispatches \
-            -d '{"ref":"main","inputs":{"kernel_version":"'"${{ steps.kver.outputs.latest }}"'"}}'
+          # Cmdline por CPU
+          cmdline_por_cpu() {
+            case "$1" in
+              # AMD Zen (znver*)
+              znver1|znver2|znver3|znver4|znver5)
+                echo "quiet loglevel=3 systemd.show_status=auto udev.log_priority=3 amd_pstate=active nowatchdog nmi_watchdog=0 kernel.split_lock_mitigate=0 mitigations=off"
+                ;;
+              # Intel (familias específicas)
+              skylake|tigerlake|icelake-client|rocketlake|alderlake|raptorlake|meteorlake|arrowlake|arrowlake-s|lunarlake)
+                echo "quiet loglevel=3 systemd.show_status=auto udev.log_priority=3 intel_pstate=active nowatchdog nmi_watchdog=0 kernel.split_lock_mitigate=0 mitigations=off"
+                ;;
+              # Genéricos: sin pstate específico
+              x86-64|x86-64-v2|x86-64-v3|x86-64-v4)
+                echo "quiet loglevel=3 systemd.show_status=auto udev.log_priority=3 nowatchdog nmi_watchdog=0 kernel.split_lock_mitigate=0 mitigations=off"
+                ;;
+              # Fallback
+              *)
+                echo "quiet loglevel=3 systemd.show_status=auto udev.log_priority=3 nowatchdog nmi_watchdog=0 kernel.split_lock_mitigate=0 mitigations=off"
+                ;;
+            esac
+          }
 
-      - name: Dispatch x86-64
-        if: steps.state.outputs.dispatch == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          curl -fsSL -X POST \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer $GH_TOKEN" \
-            https://api.github.com/repos/${{ github.repository }}/actions/workflows/Linux-TKG-Bore-LLVM-BBR-x86-64.yml/dispatches \
-            -d '{"ref":"main","inputs":{"kernel_version":"'"${{ steps.kver.outputs.latest }}"'"}}'
+          for CPU in "${CPU_OPTS[@]}"; do
+            CMDLINE="$(cmdline_por_cpu "$CPU")"
+
+            # Construimos payload con jq (evita problemas de comillas)
+            PAYLOAD="$(jq -n \
+              --arg ref "main" \
+              --arg kver "$KVER" \
+              --arg cpu  "$CPU" \
+              --arg cmd  "$CMDLINE" \
+              '{
+                ref: $ref,
+                inputs: {
+                  kernel_version: $kver,
+                  cpu_opt: $cpu,
+                  custom_cmdline: $cmd
+                }
+              }'
+            )"
+
+            echo "Despachando build para cpu_opt=$CPU (kernel=$KVER)"
+            CODE="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/${REPO}/actions/workflows/Linux-TKG-Bore-LLVM-BBR.yml/dispatches" \
+              --data "$PAYLOAD")"
+
+            if [ "$CODE" != "204" ]; then
+              echo "::error::Dispatch falló para ${CPU} (HTTP $CODE)"
+              exit 1
+            fi
+          done
+

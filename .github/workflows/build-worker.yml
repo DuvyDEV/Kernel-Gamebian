@@ -103,3 +103,14 @@ jobs:
             -H "Authorization: Bearer $GH_TOKEN" \
             https://api.github.com/repos/${{ github.repository }}/actions/workflows/Linux-TKG-Bore-LLVM-BBR-x86-64-v3.yml/dispatches \
             -d '{"ref":"main","inputs":{"kernel_version":"'"${{ steps.kver.outputs.latest }}"'"}}'
+
+      - name: Dispatch x86-64
+        if: steps.state.outputs.dispatch == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          curl -fsSL -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/Linux-TKG-Bore-LLVM-BBR-x86-64.yml/dispatches \
+            -d '{"ref":"main","inputs":{"kernel_version":"'"${{ steps.kver.outputs.latest }}"'"}}'

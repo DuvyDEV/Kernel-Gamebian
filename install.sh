@@ -195,7 +195,7 @@ case "$ICONOPT" in
     if [ "$UI_SCHEME" = "prefer-dark" ]; then
       APPLY_ICON_THEME="Papirus-Dark"
     else
-      APPLY_ICON_THEME="Papirus"   # si prefieres claro explícito: Papirus-Light
+      APPLY_ICON_THEME="Papirus-Light"
     fi
     ;;
   3)
@@ -204,13 +204,23 @@ case "$ICONOPT" in
     git clone --depth=1 https://github.com/vinceliuice/Tela-circle-icon-theme "$TMPDIR/Tela-circle-icon-theme"
     bash "$TMPDIR/Tela-circle-icon-theme/install.sh" -a -c -d /usr/share/icons
     rm -rf "$TMPDIR"
+
     echo "Colores disponibles: standard black blue brown green grey orange pink purple red yellow manjaro ubuntu dracula nord"
     read -rp "Elige el color a aplicar (por defecto: standard): " TELA_COLOR
     TELA_COLOR="${TELA_COLOR:-standard}"
+
     if [ "$TELA_COLOR" = "standard" ]; then
-      APPLY_ICON_THEME="Tela-circle"
+      if [ "$UI_SCHEME" = "prefer-dark" ]; then
+        APPLY_ICON_THEME="Tela-circle-dark"
+      else
+        APPLY_ICON_THEME="Tela-circle-light"
+      fi
     else
-      APPLY_ICON_THEME="Tela-circle-${TELA_COLOR}"
+      if [ "$UI_SCHEME" = "prefer-dark" ]; then
+        APPLY_ICON_THEME="Tela-circle-${TELA_COLOR}-dark"
+      else
+        APPLY_ICON_THEME="Tela-circle-${TELA_COLOR}-light"
+      fi
     fi
     ;;
   *)

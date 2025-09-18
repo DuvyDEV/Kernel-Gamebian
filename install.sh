@@ -18,7 +18,6 @@ echo "[*] Detectado Debian $CODENAME"
 # ===== 1) Repos oficiales (reescritura segura + multiarch i386)
 echo "[*] Configurando repos oficiales con contrib/non-free/non-free-firmware"
 cp -a /etc/apt/sources.list{,.bak}
-
 cat > /etc/apt/sources.list <<EOF
 deb http://deb.debian.org/debian ${CODENAME} main contrib non-free non-free-firmware
 deb-src http://deb.debian.org/debian ${CODENAME} main contrib non-free non-free-firmware
@@ -30,14 +29,13 @@ deb http://deb.debian.org/debian ${CODENAME}-updates main contrib non-free non-f
 deb-src http://deb.debian.org/debian ${CODENAME}-updates main contrib non-free non-free-firmware
 EOF
 
-# Habilitar arquitectura i386 para compatibilidad (Steam, libs 32-bit)
+# Habilitar arquitectura i386 (Steam/libs 32-bit)
 dpkg --add-architecture i386 2>/dev/null || true
-
 apt update
 
 # ===== 2) Utilidades básicas (incluye sudo)
 echo "[*] Instalando utilidades básicas"
-apt install -y git nano sudo wget curl ca-certificates gpg xdg-utils
+apt install -y git nano sudo wget curl ca-certificates gpg xdg-utils dconf-cli
 
 # ===== 3) Determinar usuario y agregarlo a sudo
 USERNAME="${SUDO_USER:-}"
@@ -58,7 +56,6 @@ install -d /usr/share/keyrings
 curl -fsSL https://deb.redroot.cc/KEY.asc | tee /usr/share/keyrings/debian-redroot.gpg >/dev/null
 echo "deb [signed-by=/usr/share/keyrings/debian-redroot.gpg] https://deb.redroot.cc/ stable main" \
   > /etc/apt/sources.list.d/debian-redroot.list
-
 apt update
 
 # ===== 5) GNOME + utilidades solicitadas
@@ -91,9 +88,7 @@ if [[ "${AUTOLOGIN:-N}" =~ ^[sS]$ ]]; then
   GDM_DAEMON_CONF="/etc/gdm3/daemon.conf"
   echo "[*] Configurando autologin en ${GDM_DAEMON_CONF}"
   cp -a "${GDM_DAEMON_CONF}"{,.bak}
-
   if grep -q '^\[daemon\]' "${GDM_DAEMON_CONF}"; then
-    # Asegurar/ajustar claves dentro de [daemon]
     if grep -qE '^[#\s]*AutomaticLoginEnable\s*=' "${GDM_DAEMON_CONF}"; then
       sed -i -E "s/^[#\s]*AutomaticLoginEnable\s*=.*/AutomaticLoginEnable=true/" "${GDM_DAEMON_CONF}"
     else
@@ -112,9 +107,7 @@ AutomaticLoginEnable=true
 AutomaticLogin=${USERNAME}
 EOF
   fi
-
   echo "[*] Autologin habilitado para ${USERNAME}. (Copia de seguridad en daemon.conf.bak)"
-  echo "    Nota: esto reduce la seguridad física; desactívalo editando ${GDM_DAEMON_CONF}."
 fi
 
 # ===== 6) Preferencia de Modo (Oscuro/Claro) para GNOME
@@ -129,8 +122,6 @@ if [ "$THEMEOPT" = "2" ]; then
 else
   UI_SCHEME="prefer-dark"; GTK_THEME="Adwaita-dark"
 fi
-runuser -l "$USERNAME" -c "gsettings set org.gnome.desktop.interface color-scheme '$UI_SCHEME'"
-runuser -l "$USERNAME" -c "gsettings set org.gnome.desktop.interface gtk-theme '$GTK_THEME'"
 
 # ===== 7) Kernel personalizado (redroot) + update-grub
 echo
@@ -149,7 +140,6 @@ case "$KOPT" in
 esac
 echo "[*] Instalando kernel linux-image-redroot-${KFLAV} + headers"
 apt install -y "linux-image-redroot-${KFLAV}" "linux-headers-redroot-${KFLAV}"
-
 echo "[*] Regenerando configuración de GRUB"
 update-grub || true
 
@@ -202,21 +192,19 @@ case "$ICONOPT" in
   2)
     echo "[*] Instalando Papirus"
     apt install -y papirus-icon-theme
-    # Variante según modo
     if [ "$UI_SCHEME" = "prefer-dark" ]; then
       APPLY_ICON_THEME="Papirus-Dark"
     else
-      APPLY_ICON_THEME="Papirus" # (Papirus-Light existe; si prefieres específicamente light, usa Papirus-Light)
+      APPLY_ICON_THEME="Papirus"   # si prefieres claro explícito: Papirus-Light
     fi
     ;;
   3)
     echo "[*] Instalando Tela Circle (script oficial, TODOS los colores)"
     TMPDIR="$(mktemp -d)"
     git clone --depth=1 https://github.com/vinceliuice/Tela-circle-icon-theme "$TMPDIR/Tela-circle-icon-theme"
-    # Instalar todos los colores y versión "circle" en /usr/share/icons
     bash "$TMPDIR/Tela-circle-icon-theme/install.sh" -a -c -d /usr/share/icons
     rm -rf "$TMPDIR"
-    echo "Colores disponibles para aplicar: standard black blue brown green grey orange pink purple red yellow manjaro ubuntu dracula nord"
+    echo "Colores disponibles: standard black blue brown green grey orange pink purple red yellow manjaro ubuntu dracula nord"
     read -rp "Elige el color a aplicar (por defecto: standard): " TELA_COLOR
     TELA_COLOR="${TELA_COLOR:-standard}"
     if [ "$TELA_COLOR" = "standard" ]; then
@@ -226,23 +214,18 @@ case "$ICONOPT" in
     fi
     ;;
   *)
-    echo "[*] Iconos por defecto de GNOME (sin cambios de tema)"
+    echo "[*] Iconos por defecto de GNOME (Adwaita)"
     ;;
 esac
 
-# Aplicar tema de iconos elegido (si corresponde)
-if [ -n "$APPLY_ICON_THEME" ]; then
-  runuser -l "$USERNAME" -c "gsettings set org.gnome.desktop.interface icon-theme '$APPLY_ICON_THEME'"
-fi
-
-# ===== 11) Segoe UI (opcional) + aplicar tipografías
+# ===== 11) Segoe UI (opcional)
 echo
 read -rp "¿Instalar la fuente Segoe UI (Windows 11)? [s/N]: " SEGOE
+APPLY_FONTS=0
 if [[ "${SEGOE:-N}" =~ ^[sS]$ ]]; then
   echo "[*] Instalando Segoe UI en el sistema"
   DEST_DIR="/usr/share/fonts/Microsoft/TrueType/SegoeUI"
   install -d -m0755 "$DEST_DIR"
-
   declare -A FONTS=(
     [segoeui.ttf]="https://github.com/mrbvrz/segoe-ui/raw/master/font/segoeui.ttf?raw=true"
     [segoeuib.ttf]="https://github.com/mrbvrz/segoe-ui/raw/master/font/segoeuib.ttf?raw=true"
@@ -260,37 +243,14 @@ if [[ "${SEGOE:-N}" =~ ^[sS]$ ]]; then
     [seguisym.ttf]="https://github.com/mrbvrz/segoe-ui/raw/master/font/seguisym.ttf?raw=true"
     [seguihis.ttf]="https://github.com/mrbvrz/segoe-ui/raw/master/font/seguihis.ttf?raw=true"
   )
-
   for f in "${!FONTS[@]}"; do
-    echo "  - Descargando $f"
-    wget -q "${FONTS[$f]}" -O "${DEST_DIR}/$f"
-    chmod 0644 "${DEST_DIR}/$f"
+    wget -q "${FONTS[$f]}" -O "${DEST_DIR}/$f" && chmod 0644 "${DEST_DIR}/$f"
   done
-
-  # Copiar a WINE si existe
-  WINE_FONT_DIR="/home/${USERNAME}/.wine/drive_c/windows/Fonts"
-  if [ -d "$WINE_FONT_DIR" ]; then
-    echo "[*] Copiando fuentes a WINE de ${USERNAME}"
-    install -d -m0755 "$WINE_FONT_DIR"
-    cp -f "${DEST_DIR}/"* "$WINE_FONT_DIR"/
-    chown -R "${USERNAME}:${USERNAME}" "/home/${USERNAME}/.wine"
-  fi
-
-  echo "[*] Actualizando caché de fuentes"
   fc-cache -f "$DEST_DIR" || true
-
-  # Ofrecer aplicar tipografías
-  read -rp "¿Aplicar Segoe UI como tipografía de interfaz y títulos? (Monospace será Noto Mono 10) [s/N]: " APPLYFONT
-  if [[ "${APPLYFONT:-N}" =~ ^[sS]$ ]]; then
-    runuser -l "$USERNAME" -c "gsettings set org.gnome.desktop.interface font-name 'Segoe UI 11'"
-    runuser -l "$USERNAME" -c "gsettings set org.gnome.desktop.interface document-font-name 'Segoe UI 11'"
-    runuser -l "$USERNAME" -c "gsettings set org.gnome.desktop.interface monospace-font-name 'Noto Mono 10'"
-    runuser -l "$USERNAME" -c "gsettings set org.gnome.desktop.wm.preferences titlebar-font 'Segoe UI Bold 11'"
-    echo "[*] Tipografías aplicadas."
-  fi
+  APPLY_FONTS=1
 fi
 
-# ===== 12) Opcional: Discord y/o Steam
+# ===== 12) Discord y/o Steam
 echo
 echo "== ¿Instalar Steam y/o Discord? =="
 echo "1) Solo Discord"
@@ -299,17 +259,8 @@ echo "3) Ambos"
 echo "4) Ninguno (por defecto)"
 read -rp "Opción [1-4] (por defecto 4): " GOPT
 GOPT="${GOPT:-4}"
-
-install_discord() {
-  echo "[*] Instalando Discord"
-  apt install -y discord
-}
-
-install_steam() {
-  echo "[*] Instalando Steam"
-  apt install -y steam-installer
-}
-
+install_discord() { echo "[*] Instalando Discord"; apt install -y discord; }
+install_steam()   { echo "[*] Instalando Steam";   apt install -y steam-installer; }
 case "$GOPT" in
   1) install_discord ;;
   2) install_steam ;;
@@ -330,10 +281,58 @@ else
 managed=true
 EOF
 fi
-
 systemctl restart NetworkManager || true
 
-# ===== Limpieza final de paquetes innecesarios
+# ===== 13) APLICAR CONFIG (robusto): defaults del sistema + aplicación inmediata al usuario
+echo "[*] Aplicando defaults de dconf (sistema) y ajustes para ${USERNAME}"
+
+# Crear perfil dconf si no existe
+install -d /etc/dconf/db/local.d
+if [ ! -f /etc/dconf/profile/user ]; then
+  cat >/etc/dconf/profile/user <<'EOF'
+user-db:user
+system-db:local
+EOF
+fi
+
+# Construir archivo de defaults
+DCONF_FILE="/etc/dconf/db/local.d/00-redroot"
+{
+  echo "[org/gnome/desktop/interface]"
+  echo "color-scheme='${UI_SCHEME}'"
+  echo "gtk-theme='${GTK_THEME}'"
+  if [ -n "${APPLY_ICON_THEME}" ]; then
+    echo "icon-theme='${APPLY_ICON_THEME}'"
+  fi
+  if [ "$APPLY_FONTS" -eq 1 ]; then
+    echo "font-name='Segoe UI 11'"
+    echo "document-font-name='Segoe UI 11'"
+    echo "monospace-font-name='Noto Mono 10'"
+  fi
+  echo
+  echo "[org/gnome/desktop/wm/preferences]"
+  if [ "$APPLY_FONTS" -eq 1 ]; then
+    echo "titlebar-font='Segoe UI Bold 11'"
+  fi
+} > "$DCONF_FILE"
+
+# Aplicar base de datos de defaults
+dconf update
+
+# Aplicación inmediata al usuario (Wayland-safe con dbus-run-session)
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface color-scheme '${UI_SCHEME}'"
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface gtk-theme '${GTK_THEME}'"
+if [ -n "${APPLY_ICON_THEME}" ]; then
+  runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface icon-theme '${APPLY_ICON_THEME}'"
+fi
+if [ "$APPLY_FONTS" -eq 1 ]; then
+  runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface font-name 'Segoe UI 11'"
+  runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface document-font-name 'Segoe UI 11'"
+  runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface monospace-font-name 'Noto Mono 10'"
+  runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.wm.preferences titlebar-font 'Segoe UI Bold 11'"
+fi
+
+# ===== Limpieza final
 echo
 echo "[*] Realizando limpieza final"
 apt autoremove --purge -y malcontent* yelp* debian-reference* || true
@@ -361,3 +360,4 @@ echo " - Modo UI: $( [ "$UI_SCHEME" = "prefer-dark" ] && echo 'Oscuro' || echo '
 echo " - Revisa install.log si algo falló."
 echo " - Recomiendo reiniciar antes de iniciar sesión gráfica."
 echo "======================================="
+

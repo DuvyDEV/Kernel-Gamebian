@@ -119,7 +119,7 @@ apt update
 
 # ===== 2) Utilidades básicas (incluye sudo)
 echo "[*] Instalando utilidades básicas"
-apt install -y git nano sudo wget curl ca-certificates gpg xdg-utils dconf-cli python3-minimal
+apt install -y git nano sudo wget curl ca-certificates gpg dconf-cli python3-minimal
 
 # ===== 3) Determinar usuario y agregarlo a sudo
 USERNAME="${SUDO_USER:-}"
@@ -151,7 +151,7 @@ echo "[*] Instalando GNOME, utilidades y compresión"
 apt install -y \
   gdm3 gnome-shell gnome-console gnome-tweaks gnome-themes-extra \
   ffmpegthumbnailer power-profiles-daemon seahorse eog \
-  xdg-user-dirs xdg-user-dirs-gtk \
+  xdg-user-dirs xdg-user-dirs-gtk xdg-utils \
   xdg-desktop-portal xdg-desktop-portal-gnome xdg-desktop-portal-gtk \
   gnome-browser-connector gnome-text-editor gnome-disk-utility \
   gnome-shell-extension-prefs gnome-shell-extension-appindicator \

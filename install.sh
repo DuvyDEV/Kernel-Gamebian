@@ -353,15 +353,47 @@ if [[ -z "$RESUME_MODE" ]]; then
   fi
 else
   if [[ "$RESUME_MODE" == "nvidia" ]]; then
-    echo "[*] Fase reanudada: instalación de nvidia-open"
+    echo "[*] Fase reanudada: verificación de kernel redroot antes de NVIDIA"
+    # Verificar que el kernel activo provenga de un paquete linux-image-redroot-*
+    CURRENT_PKG="$(dpkg -S "/boot/vmlinuz-$(uname -r)" 2>/dev/null | awk -F: 'NR==1{print $1}')"
+    echo "[i] Kernel activo: $(uname -r) (paquete: ${CURRENT_PKG:-desconocido})"
+
+    if [[ "$CURRENT_PKG" != linux-image-redroot-* ]]; then
+      echo "[!] El kernel activo NO es un paquete redroot. Aborto instalación de NVIDIA."
+      echo "    Reinicia con el kernel redroot seleccionado y vuelve a ejecutar en modo reanudación."
+      exit 1
+    fi
+
+    echo "[*] Kernel redroot activo confirmado. Purga de kernels genéricos de Debian..."
+    # Listar paquetes linux-image*/linux-headers* NO redroot (incluye metapaquetes)
+    TO_PURGE="$( (dpkg -l 'linux-image*' 'linux-headers*' 2>/dev/null | awk '/^ii/{print $2}' | \
+                   grep -E '^(linux-(image|headers))-' | \
+                   grep -Ev '^(linux-(image|headers)-redroot-)' || true)
+                 ; dpkg -l linux-image-amd64 linux-headers-amd64 2>/dev/null | awk '/^ii/{print $2}' )"
+    TO_PURGE="$(echo "$TO_PURGE" | sort -u | tr '\n' ' ' )"
+
+    if [[ -n "${TO_PURGE// /}" ]]; then
+      echo "[*] Paquetes a purgar: $TO_PURGE"
+      apt purge -y $TO_PURGE || true
+      apt autoremove -y --purge || true
+    else
+      echo "[i] No se encontraron kernels genéricos para purgar."
+    fi
+
+    echo "[*] Ejecutando update-grub tras la purga"
+    update-grub || true
+
+    echo "[*] Instalación de nvidia-open"
     TMPDEB="$(mktemp -u /tmp/cuda-keyring_XXXX.deb)"
     wget -O "$TMPDEB" https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb
     dpkg -i "$TMPDEB" || { echo "dpkg falló. Revisa compatibilidad del keyring con trixie."; exit 1; }
     rm -f "$TMPDEB"
     apt update
     apt install -y nvidia-open
+
     echo "[*] Regenerando GRUB tras instalar NVIDIA"
     update-grub || true
+
     echo "[*] Limpieza del modo reanudación (servicio y state file)"
     clear_resume_service
     RESUME_MODE=""

@@ -537,7 +537,8 @@ DCONF_FILE="/etc/dconf/db/local.d/00-redroot"
   if [ "${APPLY_FONTS:-0}" -eq 1 ]; then
     echo "titlebar-font='Segoe UI Bold 11'"
   fi
-
+  echo "button-layout='appmenu:minimize,maximize,close'"
+  
   echo
   echo "[org/gnome/desktop/peripherals/mouse]"
   echo "accel-profile='flat'"
@@ -573,6 +574,7 @@ if [ "${APPLY_FONTS:-0}" -eq 1 ]; then
   runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface document-font-name 'Segoe UI 11'"
   runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface monospace-font-name 'Noto Mono 10'"
   runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.wm.preferences titlebar-font 'Segoe UI Bold 11'"
+  runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.wm.preferences button-layout 'appmenu:minimize,maximize,close'"
 fi
 runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.peripherals.mouse accel-profile 'flat'"
 runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.peripherals.touchpad accel-profile 'flat' || true"

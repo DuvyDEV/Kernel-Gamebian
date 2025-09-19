@@ -3,6 +3,9 @@ set -euo pipefail
 exec > >(tee -i install.log)
 exec 2>&1
 
+# Diagnóstico de errores
+trap 's=$?; echo "[!] Error en línea $LINENO: comando \"$BASH_COMMAND\" salió con $s" >&2' ERR
+
 if [ "$(id -u)" -ne 0 ]; then
   echo "Este script debe ejecutarse como root."; exit 1
 fi
@@ -15,12 +18,64 @@ if [ "$CODENAME" != "trixie" ]; then
 fi
 echo "[*] Detectado Debian $CODENAME"
 
+# ===== Reanudación tras reinicio (systemd + state file)
+SCRIPT_PATH="$(readlink -f "$0")"
+STATE_FILE="/var/lib/redroot-postinstall.state"
+RESUME_MODE=""
+
+setup_resume_service() {
+  # $1 = modo de reanudación (p.ej. "nvidia")
+  local mode="$1"
+  install -d -m0755 "$(dirname "$STATE_FILE")"
+  umask 077
+  {
+    echo "RESUME_FROM='$mode'"
+    # Persistimos variables necesarias tras el reinicio
+    echo "USERNAME='${USERNAME:-}'"
+    echo "KFLAV='${KFLAV:-}'"
+    echo "UI_SCHEME='${UI_SCHEME:-}'"
+    echo "GTK_THEME='${GTK_THEME:-}'"
+    echo "APPLY_FONTS='${APPLY_FONTS:-0}'"
+    echo "CODENAME='${CODENAME:-}'"
+  } > "$STATE_FILE"
+
+  cat > /etc/systemd/system/redroot-postinstall-resume.service <<EOF
+[Unit]
+Description=Resume Debian post-install (redroot) after reboot
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash "$SCRIPT_PATH" --resume
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable redroot-postinstall-resume.service
+}
+
+clear_resume_service() {
+  systemctl disable redroot-postinstall-resume.service 2>/dev/null || true
+  rm -f /etc/systemd/system/redroot-postinstall-resume.service
+  systemctl daemon-reload || true
+  rm -f "$STATE_FILE"
+}
+
+# Si nos invoca systemd en modo reanudación
+if [[ "${1:-}" == "--resume" && -f "$STATE_FILE" ]]; then
+  # shellcheck disable=SC1090
+  . "$STATE_FILE"
+  RESUME_MODE="${RESUME_FROM:-}"
+  echo "[*] Reanudando post-instalación desde fase: ${RESUME_MODE}"
+fi
+
 # ===== Verificar Secure Boot (robusto: mokutil o efivars)
 secureboot_enabled() {
   if command -v mokutil >/dev/null 2>&1; then
     mokutil --sb-state 2>/dev/null | grep -qi 'enabled' && return 0
   fi
-  # Lectura directa desde efivars: 5º byte (tras 4 bytes de atributos) vale 0x01 si está habilitado
   local efivar
   efivar="$(ls /sys/firmware/efi/efivars/SecureBoot-* 2>/dev/null | head -n1)"
   if [ -n "$efivar" ]; then
@@ -37,18 +92,25 @@ if secureboot_enabled; then
   exit 1
 fi
 
+# =====================================================================
+# ===================== [PRE-NVIDIA] INICIO ============================
+# Este bloque corre sólo en la PRIMERA ejecución (antes del reinicio).
+# Tras reanudar, se salta completo y retomamos desde NVIDIA.
+# =====================================================================
+if [[ -z "$RESUME_MODE" ]]; then
+
 # ===== 1) Repos oficiales (reescritura segura + multiarch i386)
 echo "[*] Configurando repos oficiales con contrib/non-free/non-free-firmware"
 cp -a /etc/apt/sources.list{,.bak}
 cat > /etc/apt/sources.list <<EOF
-deb http://deb.debian.org/debian ${CODENAME} main contrib non-free non-free-firmware
-deb-src http://deb.debian.org/debian ${CODENAME} main contrib non-free non-free-firmware
+deb https://deb.debian.org/debian ${CODENAME} main contrib non-free non-free-firmware
+deb-src https://deb.debian.org/debian ${CODENAME} main contrib non-free non-free-firmware
 
-deb http://security.debian.org/debian-security ${CODENAME}-security main contrib non-free non-free-firmware
-deb-src http://security.debian.org/debian-security ${CODENAME}-security main contrib non-free non-free-firmware
+deb https://security.debian.org/debian-security ${CODENAME}-security main contrib non-free non-free-firmware
+deb-src https://security.debian.org/debian-security ${CODENAME}-security main contrib non-free non-free-firmware
 
-deb http://deb.debian.org/debian ${CODENAME}-updates main contrib non-free non-free-firmware
-deb-src http://deb.debian.org/debian ${CODENAME}-updates main contrib non-free non-free-firmware
+deb https://deb.debian.org/debian ${CODENAME}-updates main contrib non-free non-free-firmware
+deb-src https://deb.debian.org/debian ${CODENAME}-updates main contrib non-free non-free-firmware
 EOF
 
 # Habilitar arquitectura i386 (Steam/libs 32-bit)
@@ -78,7 +140,8 @@ usermod -a -G sudo "$USERNAME"
 # ===== 4) Configurar repo redroot (stable exclusivo para trixie)
 echo "[*] Configurando repo redroot (stable)"
 install -d /usr/share/keyrings
-curl -fsSL https://deb.redroot.cc/KEY.asc | tee /usr/share/keyrings/debian-redroot.gpg >/dev/null
+# De-armored para APT
+curl -fsSL https://deb.redroot.cc/KEY.asc | gpg --dearmor | tee /usr/share/keyrings/debian-redroot.gpg >/dev/null
 echo "deb [signed-by=/usr/share/keyrings/debian-redroot.gpg] https://deb.redroot.cc/ stable main" \
   > /etc/apt/sources.list.d/debian-redroot.list
 apt update
@@ -105,14 +168,15 @@ else
 fi
 SYS_LANG="${SYS_LOCALE%%.*}"
 
-# Asegurarse de que el paquete 'locales' esté instalado y el locale esté generado
+# Asegurar paquete 'locales' y que el locale esté generado (idempotente)
 echo "[*] Verificando y generando locale '${SYS_LOCALE}'"
-if ! locale -a 2>/dev/null | grep -qi "^${SYS_LANG}\.utf-?8$"; then
-    apt-get update
-    apt-get install -y --no-install-recommends locales
-    sed -i -E "s/^#\s*(${SYS_LOCALE//./\\.})/\1/" /etc/locale.gen
-    locale-gen
-fi
+apt-get update
+apt-get install -y --no-install-recommends locales
+# Si no existe la línea, la añadimos; si está comentada, la descomentamos
+grep -qE "^[#\s]*${SYS_LOCALE//./\\.}(\s|$)" /etc/locale.gen || echo "${SYS_LOCALE} UTF-8" >> /etc/locale.gen
+sed -i -E "s/^#\s*(${SYS_LOCALE//./\\.})(\s|$)/\1/" /etc/locale.gen
+locale-gen
+update-locale LANG="${SYS_LOCALE}"
 
 # Escribir el idioma en el archivo de configuración del usuario
 echo "[*] Escribiendo el locale en ~/.config/user-dirs.locale"
@@ -130,13 +194,11 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 # === UUIDs de extensiones (detección robusta) ===
-# AppIndicator puede venir como ubuntu-appindicators@ubuntu.com (algunos builds) o gcampax (Debian puro)
 if [ -d "/usr/share/gnome-shell/extensions/ubuntu-appindicators@ubuntu.com" ]; then
   APPINDICATOR_UUID="ubuntu-appindicators@ubuntu.com"
 else
   APPINDICATOR_UUID="appindicatorsupport@gnome-shell-extensions.gcampax.github.com"
 fi
-# Dash to Panel (paquete Debian)
 DASH2P_UUID="dash-to-panel@jderose9.github.com"
 
 # ===== 5c) Inicio de sesión automático (GDM)
@@ -249,7 +311,6 @@ case "$KOPT" in
   20)
     echo "[*] Detectando el nivel de arquitectura x86-64..."
     cpu_flags=$(lscpu)
-
     if echo "$cpu_flags" | grep -E -q "\bavx512f\b"; then
         KFLAV="x86-64-v4"
     elif echo "$cpu_flags" | grep -E -q "\bavx2\b" && echo "$cpu_flags" | grep -E -q "\bavx\b"; then
@@ -268,20 +329,43 @@ echo "[*] Instalando kernel linux-image-redroot-${KFLAV} + headers"
 apt install -y "linux-image-redroot-${KFLAV}" "linux-headers-redroot-${KFLAV}"
 echo "[*] Regenerando configuración de GRUB"
 update-grub || true
+echo "[i] Kernel en ejecución actual: $(uname -r)"
+echo "[i] Tras el reinicio, el módulo NVIDIA se construirá para el kernel nuevo."
 
-# ===== 8) NVIDIA opcional (con update-grub posterior)
-echo
-read -rp "¿Instalar drivers NVIDIA (nvidia-open)? [s/N]: " NV
-if [[ "${NV:-N}" =~ ^[sS]$ ]]; then
-  echo "[*] Instalando keyring CUDA y nvidia-open"
-  TMPDEB="$(mktemp -u /tmp/cuda-keyring_XXXX.deb)"
-  wget -O "$TMPDEB" https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb
-  dpkg -i "$TMPDEB" || { echo "dpkg falló. Revisa compatibilidad del keyring con trixie."; exit 1; }
-  rm -f "$TMPDEB"
-  apt update
-  apt install -y nvidia-open
-  echo "[*] Regenerando GRUB tras instalar NVIDIA"
-  update-grub || true
+fi
+# =====================================================================
+# ======================= [PRE-NVIDIA] FIN =============================
+# =====================================================================
+
+# ===== 8) NVIDIA opcional (con reanudación automática tras reinicio)
+if [[ -z "$RESUME_MODE" ]]; then
+  echo
+  read -rp "¿Instalar drivers NVIDIA (nvidia-open)? Requiere reinicio previo. [s/N]: " NV
+  if [[ "${NV:-N}" =~ ^[sS]$ ]]; then
+    echo "[*] Preparando reanudación para instalar nvidia-open con el kernel recién instalado..."
+    setup_resume_service "nvidia"
+    echo "[*] Se reiniciará en 5 segundos para continuar automáticamente."
+    sleep 5
+    reboot
+    exit 0
+  else
+    echo "[*] Omitiendo NVIDIA"
+  fi
+else
+  if [[ "$RESUME_MODE" == "nvidia" ]]; then
+    echo "[*] Fase reanudada: instalación de nvidia-open"
+    TMPDEB="$(mktemp -u /tmp/cuda-keyring_XXXX.deb)"
+    wget -O "$TMPDEB" https://developer.download.nvidia.com/compute/cuda/repos/debian12/x86_64/cuda-keyring_1.1-1_all.deb
+    dpkg -i "$TMPDEB" || { echo "dpkg falló. Revisa compatibilidad del keyring con trixie."; exit 1; }
+    rm -f "$TMPDEB"
+    apt update
+    apt install -y nvidia-open
+    echo "[*] Regenerando GRUB tras instalar NVIDIA"
+    update-grub || true
+    echo "[*] Limpieza del modo reanudación (servicio y state file)"
+    clear_resume_service
+    RESUME_MODE=""
+  fi
 fi
 
 # ===== 9) Navegador (Firefox ESR o Brave)
@@ -296,7 +380,7 @@ if [ "$BOPT" = "2" ]; then
   curl -fsSLo /usr/share/keyrings/brave-browser-archive-keyring.gpg \
     https://brave-browser-apt-release.s3.brave.com/brave-browser-archive-keyring.gpg
   curl -fsSLo /etc/apt/sources.list.d/brave-browser-release.sources \
-    https://brave-browser-apt-release.s3.brave.com/brave-browser.sources
+    https://brave-browser-apt-release.s3.brave.com/brave-browser-apt-release.sources
   apt update
   apt install -y brave-browser
 else
@@ -318,7 +402,7 @@ case "$ICONOPT" in
   2)
     echo "[*] Instalando Papirus"
     apt install -y papirus-icon-theme
-    if [ "$UI_SCHEME" = "prefer-dark" ]; then
+    if [ "${UI_SCHEME:-prefer-dark}" = "prefer-dark" ]; then
       APPLY_ICON_THEME="Papirus-Dark"
     else
       APPLY_ICON_THEME="Papirus-Light"
@@ -336,13 +420,13 @@ case "$ICONOPT" in
     TELA_COLOR="${TELA_COLOR:-standard}"
 
     if [ "$TELA_COLOR" = "standard" ]; then
-      if [ "$UI_SCHEME" = "prefer-dark" ]; then
+      if [ "${UI_SCHEME:-prefer-dark}" = "prefer-dark" ]; then
         APPLY_ICON_THEME="Tela-circle-dark"
       else
         APPLY_ICON_THEME="Tela-circle-light"
       fi
     else
-      if [ "$UI_SCHEME" = "prefer-dark" ]; then
+      if [ "${UI_SCHEME:-prefer-dark}" = "prefer-dark" ]; then
         APPLY_ICON_THEME="Tela-circle-${TELA_COLOR}-dark"
       else
         APPLY_ICON_THEME="Tela-circle-${TELA_COLOR}-light"
@@ -357,9 +441,9 @@ esac
 # ===== 11) Segoe UI (opcional)
 echo
 read -rp "¿Instalar la fuente Segoe UI (Windows 11)? [s/N]: " SEGOE
-APPLY_FONTS=0
+APPLY_FONTS="${APPLY_FONTS:-0}"
 if [[ "${SEGOE:-N}" =~ ^[sS]$ ]]; then
-  echo "[*] Instalando Segoe UI en el sistema"
+  echo "[*] Instalando Segoe UI en el sistema (origen no oficial; considera licencias)"
   DEST_DIR="/usr/share/fonts/Microsoft/TrueType/SegoeUI"
   install -d -m0755 "$DEST_DIR"
   declare -A FONTS=(
@@ -435,15 +519,14 @@ fi
 DCONF_FILE="/etc/dconf/db/local.d/00-redroot"
 {
   echo "[org/gnome/desktop/interface]"
-  echo "color-scheme='${UI_SCHEME}'"
-  echo "gtk-theme='${GTK_THEME}'"
-  if [ -n "${APPLY_ICON_THEME}" ]; then
+  echo "color-scheme='${UI_SCHEME:-prefer-dark}'"
+  echo "gtk-theme='${GTK_THEME:-Adwaita-dark}'"
+  if [ -n "${APPLY_ICON_THEME:-}" ]; then
     echo "icon-theme='${APPLY_ICON_THEME}'"
   fi
-  # Alisado subpíxel (claves correctas en GNOME moderno)
   echo "font-antialiasing='rgba'"
   echo "font-rgba-order='rgb'"
-  if [ "$APPLY_FONTS" -eq 1 ]; then
+  if [ "${APPLY_FONTS:-0}" -eq 1 ]; then
     echo "font-name='Segoe UI 11'"
     echo "document-font-name='Segoe UI 11'"
     echo "monospace-font-name='Noto Mono 10'"
@@ -451,11 +534,10 @@ DCONF_FILE="/etc/dconf/db/local.d/00-redroot"
 
   echo
   echo "[org/gnome/desktop/wm/preferences]"
-  if [ "$APPLY_FONTS" -eq 1 ]; then
+  if [ "${APPLY_FONTS:-0}" -eq 1 ]; then
     echo "titlebar-font='Segoe UI Bold 11'"
   fi
 
-  # Desactivar aceleración del ratón/touchpad
   echo
   echo "[org/gnome/desktop/peripherals/mouse]"
   echo "accel-profile='flat'"
@@ -464,7 +546,6 @@ DCONF_FILE="/etc/dconf/db/local.d/00-redroot"
   echo "[org/gnome/desktop/peripherals/touchpad]"
   echo "accel-profile='flat'"
 
-  # === Fondo por defecto para todos los usuarios ===
   echo
   echo "[org/gnome/desktop/background]"
   echo "picture-uri='file:///usr/share/backgrounds/redroot/default.png'"
@@ -479,33 +560,29 @@ DCONF_FILE="/etc/dconf/db/local.d/00-redroot"
 dconf update
 
 # Aplicación inmediata al usuario (Wayland-safe con dbus-run-session)
-runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface color-scheme '${UI_SCHEME}'"
-runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface gtk-theme '${GTK_THEME}'"
-if [ -n "${APPLY_ICON_THEME}" ]; then
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface color-scheme '${UI_SCHEME:-prefer-dark}'"
+runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface gtk-theme '${GTK_THEME:-Adwaita-dark}'"
+if [ -n "${APPLY_ICON_THEME:-}" ]; then
   runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface icon-theme '${APPLY_ICON_THEME}'"
 fi
-# Alisado subpíxel aplicado al usuario
 runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface font-antialiasing 'rgba'"
 runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface font-rgba-order 'rgb'"
 
-if [ "$APPLY_FONTS" -eq 1 ]; then
+if [ "${APPLY_FONTS:-0}" -eq 1 ]; then
   runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface font-name 'Segoe UI 11'"
   runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface document-font-name 'Segoe UI 11'"
   runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.interface monospace-font-name 'Noto Mono 10'"
   runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.wm.preferences titlebar-font 'Segoe UI Bold 11'"
 fi
-# Ratón/touchpad sin aceleración
 runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.peripherals.mouse accel-profile 'flat'"
 runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.peripherals.touchpad accel-profile 'flat' || true"
 
 # === Activar extensiones para el usuario actual ===
-# 1) Intentar con el CLI oficial (si existe)
 runuser -l "$USERNAME" -c "dbus-run-session bash -lc '
 if command -v gnome-extensions >/dev/null 2>&1; then
   gnome-extensions enable \"${APPINDICATOR_UUID}\" || true
   gnome-extensions enable \"${DASH2P_UUID}\" || true
 else
-  # 2) Fallback sin CLI: fusionar vía gsettings usando python3
   U1=\"${APPINDICATOR_UUID}\" U2=\"${DASH2P_UUID}\" python3 - <<\"PY\"
 import ast, os, subprocess
 uuids = [os.environ.get(\"U1\",\"\"), os.environ.get(\"U2\",\"\")]
@@ -520,7 +597,6 @@ except Exception:
 for u in uuids:
     if u and u not in arr:
         arr.append(u)
-# gsettings espera comillas simples para strings
 val = \"[\" + \", \".join(\"'\"+x+\"'\" for x in arr) + \"]\"
 subprocess.check_call([\"gsettings\",\"set\",\"org.gnome.shell\",\"enabled-extensions\", val])
 PY
@@ -533,7 +609,7 @@ WALLPAPER_DIR="/usr/share/backgrounds/redroot"
 WALLPAPER_FILE="${WALLPAPER_DIR}/default.png"
 
 install -d "$WALLPAPER_DIR"
-wget -qO "$WALLPAPER_FILE" "https://raw.githubusercontent.com/RedrootDEV/Debian-RedRoot/refs/heads/main/configs/default.png"
+wget -qO "$WALLPAPER_FILE" "https://raw.githubusercontent.com/RedrootDEV/Debian-RedRoot/main/configs/default.png"
 
 # Establecer wallpaper en GNOME para el usuario
 runuser -l "$USERNAME" -c "dbus-run-session gsettings set org.gnome.desktop.background picture-uri 'file://$WALLPAPER_FILE'"
@@ -569,7 +645,9 @@ echo "[*] Realizando limpieza final"
 apt autoremove --purge -y malcontent* yelp* debian-reference* zutty* plymouth* || true
 apt clean
 apt autoclean
-echo "[*] Limpieza finalizada"
+
+# Limpieza defensiva de cualquier rastro de reanudación
+clear_resume_service || true
 
 # ===== Preguntar por reinicio
 echo
@@ -585,9 +663,9 @@ echo
 echo "======================================="
 echo " Instalación finalizada."
 echo " - Usuario en grupo sudo: ${USERNAME}"
-echo " - Kernel redroot: ${KFLAV}"
+echo " - Kernel redroot: ${KFLAV:-no-seleccionado}"
 echo " - GDM habilitado; target por defecto: graphical"
-echo " - Modo UI: $( [ "$UI_SCHEME" = "prefer-dark" ] && echo 'Oscuro' || echo 'Claro' )"
+echo " - Modo UI: $( [ "${UI_SCHEME:-prefer-dark}" = "prefer-dark" ] && echo 'Oscuro' || echo 'Claro' )"
 echo " - Revisa install.log si algo falló."
 echo " - Recomiendo reiniciar antes de iniciar sesión gráfica."
 echo "======================================="

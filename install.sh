@@ -366,11 +366,15 @@ else
 
     echo "[*] Kernel redroot activo confirmado. Purga de kernels genéricos de Debian..."
     # Listar paquetes linux-image*/linux-headers* NO redroot (incluye metapaquetes)
-    TO_PURGE="$( (dpkg -l 'linux-image*' 'linux-headers*' 2>/dev/null | awk '/^ii/{print $2}' | \
-                   grep -E '^(linux-(image|headers))-' | \
-                   grep -Ev '^(linux-(image|headers)-redroot-)' || true)
-                 ; dpkg -l linux-image-amd64 linux-headers-amd64 2>/dev/null | awk '/^ii/{print $2}' )"
-    TO_PURGE="$(echo "$TO_PURGE" | sort -u | tr '\n' ' ' )"
+    TO_PURGE="$(
+      {
+        dpkg -l 'linux-image*' 'linux-headers*' 2>/dev/null | awk '/^ii/{print $2}' \
+          | grep -E '^(linux-(image|headers))-' \
+          | grep -Ev '^(linux-(image|headers)-redroot-)' || true
+        dpkg -l linux-image-amd64 linux-headers-amd64 2>/dev/null | awk '/^ii/{print $2}'
+      } | sort -u
+    )"
+    TO_PURGE="$(echo "$TO_PURGE" | tr '\n' ' ')"
 
     if [[ -n "${TO_PURGE// /}" ]]; then
       echo "[*] Paquetes a purgar: $TO_PURGE"

@@ -49,13 +49,6 @@ KIMG_RE = re.compile(r"^linux-image-(?P<ver>[^_]+)-tkg-redroot-(?P<cpu>[^_]+)_.*
 KHDR_RE = re.compile(r"^linux-headers-(?P<ver>[^_]+)-tkg-redroot-(?P<cpu>[^_]+)_.*amd64\.deb$")
 
 # =========================
-#  Lutris (OBS / openSUSE)
-# =========================
-LUTRIS_DIRLIST = "https://download.opensuse.org/repositories/home:/strycore/Debian_12/all/"
-LUTRIS_SUBDIR = "lutris"
-LUTRIS_RE = re.compile(r'href=[\'"]?(?P<fname>lutris_(?P<ver>[^_\'"]+)_all\.deb)')
-
-# =========================
 #  Utilidades / log
 # =========================
 def log(msg): print(f"[INFO] {msg}", flush=True)
@@ -91,7 +84,6 @@ def ensure_layout():
     (REPO_DIR / "pool" / "main" / FREETUBE_SUBDIR).mkdir(parents=True, exist_ok=True)
     (REPO_DIR / "pool" / "main" / GH_DESKTOP_SUBDIR).mkdir(parents=True, exist_ok=True)
     (REPO_DIR / "pool" / "main" / KERNEL_SUBDIR).mkdir(parents=True, exist_ok=True)
-    (REPO_DIR / "pool" / "main" / LUTRIS_SUBDIR).mkdir(parents=True, exist_ok=True)
 
 # =========================
 #  Discord
@@ -216,27 +208,6 @@ def latest_redroot_kernel_assets():
             out[cpu]["headers"] = (url, ver, name)
         out[cpu]["version"] = ver
     return {cpu: info for cpu, info in out.items() if info["image"] and info["headers"]}
-
-# =========================
-#  Lutris
-# =========================
-def lutris_latest_deb_url_and_version():
-    r = requests.get(LUTRIS_DIRLIST, timeout=30)
-    r.raise_for_status()
-    candidates = []
-    for m in LUTRIS_RE.finditer(r.text):
-        fname = m.group("fname")
-        ver = m.group("ver")
-        candidates.append((ver, fname))
-    if not candidates:
-        raise RuntimeError("No encontré .deb de Lutris en el índice de OBS")
-
-    # Seleccionar la versión más alta usando comparación Debian
-    best_ver = sort_versions_debian([v for v, _ in candidates])[-1]
-    best_name = next(fname for v, fname in candidates if v == best_ver)
-    url = urllib.parse.urljoin(LUTRIS_DIRLIST, best_name)
-    log(f"Lutris versión detectada: {best_ver} ({best_name})")
-    return url, best_ver, best_name
 
 # =========================
 #  Aux
@@ -489,12 +460,6 @@ def one_cycle():
 
     # Redroot Kernels (mantiene últimas 3 por CPU)
     if ingest_redroot_kernels():
-        changed = True
-        
-    # Lutris (conserva solo la última)
-    url_l, ver_l, name_l = lutris_latest_deb_url_and_version()
-    clean_name_l = f"lutris_{ver_l}_all.deb"
-    if download_if_needed(url_l, ver_l, subdir=LUTRIS_SUBDIR, target_name=clean_name_l):
         changed = True
 
     if changed:

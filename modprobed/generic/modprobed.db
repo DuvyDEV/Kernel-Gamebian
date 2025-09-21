@@ -1,4 +1,6 @@
 8021q
+8139cp
+8139too
 8250_dw
 842
 842_compress
@@ -93,15 +95,21 @@ cifs_arc4
 cifs_md4
 cls_cgroup
 cmac
+configfs
 coretemp
 cp210x
 cpufreq_ondemand
 crc16
+crc32_pclmul
+crc32c_generic
+crc32c_intel
 crc64
 crc8
 crc_itu_t
+crct10dif_pclmul
 cryptd
 crypto_null
+crypto_simd
 crypto_user
 curve25519_x86_64
 cuse
@@ -156,6 +164,7 @@ fb_sys_fops
 ff_memless
 fixed_phy
 fjes
+floppy
 ftdi_sio
 fuse
 fwnode_mdio
@@ -290,6 +299,7 @@ libarc4
 libata
 libchacha
 libchacha20poly1305
+libcrc32c
 libcurve25519_generic
 libdes
 libphy
@@ -443,7 +453,9 @@ psmouse
 psnap
 ptp
 qcserial
+qemu_fw_cfg
 qrtr
+qxl
 r8152
 r8153_ecm
 r8169
@@ -494,6 +506,7 @@ serio_raw
 ses
 sg
 sha1_ssse3
+sha256_ssse3
 sha512_ssse3
 snd
 snd_ac97_codec
@@ -654,6 +667,8 @@ vfio
 vfio_iommu_type1
 vfio_pci
 vfio_pci_core
+vga16fb
+vgastate
 vhost
 vhost_iotlb
 vhost_net
@@ -663,6 +678,7 @@ videobuf2_memops
 videobuf2_v4l2
 videobuf2_vmalloc
 videodev
+virtio_balloon
 virtio_blk
 virtio_gpu
 virtio_net

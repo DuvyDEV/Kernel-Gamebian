@@ -409,7 +409,7 @@ def generate_packages():
     out = subprocess.run(["bash","-lc", cmd], cwd=REPO_DIR, capture_output=True, text=True)
     if out.returncode != 0:
         err(out.stderr); raise RuntimeError("dpkg-scanpackages falló")
-    entries = len([ln for ln in out.stdout.splitlines() if ln.strip()])
+    entries = sum(1 for ln in out.stdout.splitlines() if ln.startswith("Package: "))
     log(f"Entradas {PRIMARY_ARCH} en Packages: {entries}")
 
     for arch in ARCHES:
@@ -493,8 +493,7 @@ def one_cycle():
         
     # Lutris (conserva solo la última)
     url_l, ver_l, name_l = lutris_latest_deb_url_and_version()
-    clean_name_l = f"lutris_{ver_l}_all.deb"
-    if download_if_needed(url_l, ver_l, subdir=LUTRIS_SUBDIR, target_name=clean_name_l):
+    if download_if_needed(url_l, ver_l, subdir=LUTRIS_SUBDIR, target_name=name_l):
         changed = True
 
     if changed:

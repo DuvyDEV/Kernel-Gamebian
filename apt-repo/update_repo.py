@@ -17,6 +17,9 @@ CHECK_INTERVAL_SECS = 900  # 15 minutos
 PRIMARY_ARCH = "amd64"
 ARCHES = ["amd64", "i386", "arm64", "armhf"]
 
+# Endpoint común para GitHub (usado por varios módulos)
+GITHUB_API = "https://api.github.com"
+
 # =========================
 #  GitHub Desktop (GitHub)
 # =========================
@@ -29,7 +32,12 @@ GH_DESKTOP_SUBDIR = "github-desktop"
 FREETUBE_REPO = "FreeTubeApp/FreeTube"
 FREETUBE_SUBDIR = "freetube"
 FREETUBE_ALLOW_PRERELEASE = True
-GITHUB_API = "https://api.github.com"
+
+# =========================
+#  Heroic Launcher (GitHub)
+# =========================
+HEROIC_REPO = "Heroic-Games-Launcher/HeroicGamesLauncher"
+HEROIC_SUBDIR = "heroic"
 
 # =========================
 #  Redroot Kernels (Debian-RedRoot)
@@ -84,6 +92,7 @@ def ensure_layout():
     (REPO_DIR / "pool" / "main" / FREETUBE_SUBDIR).mkdir(parents=True, exist_ok=True)
     (REPO_DIR / "pool" / "main" / GH_DESKTOP_SUBDIR).mkdir(parents=True, exist_ok=True)
     (REPO_DIR / "pool" / "main" / KERNEL_SUBDIR).mkdir(parents=True, exist_ok=True)
+    (REPO_DIR / "pool" / "main" / HEROIC_SUBDIR).mkdir(parents=True, exist_ok=True)
 
 # =========================
 #  Discord
@@ -102,10 +111,9 @@ def latest_deb_url_and_version():
     return final, version
 
 # =========================
-#  FreeTube (GitHub releases)
+#  GitHub releases – helpers genéricos
 # =========================
-def github_latest_asset(repo: str, allow_prerelease: bool = True):
-    url = f"{GITHUB_API}/repos/{repo}/releases?per_page=10"
+def github_api_headers():
     headers = {
         "Accept": "application/vnd.github+json",
         "User-Agent": "apt-repo-bot/1.0",
@@ -113,62 +121,64 @@ def github_latest_asset(repo: str, allow_prerelease: bool = True):
     tok = os.getenv("GITHUB_TOKEN")
     if tok:
         headers["Authorization"] = f"Bearer {tok}"
+    return headers
 
-    r = requests.get(url, headers=headers, timeout=30)
+def github_latest_asset_by_regex(repo: str, name_re: re.Pattern, allow_prerelease: bool = True):
+    """
+    Devuelve (download_url, version, asset_name) del asset más reciente cuyo nombre
+    matchea name_re. La versión se obtiene del tag (quitando 'v' al inicio), o del
+    primer grupo capturado del regex, o como último recurso de un semver dentro del nombre.
+    """
+    url = f"{GITHUB_API}/repos/{repo}/releases?per_page=10"
+    r = requests.get(url, headers=github_api_headers(), timeout=30)
     r.raise_for_status()
-    releases = r.json()
-    for rel in releases:
+
+    for rel in r.json():
         if rel.get("draft"):
             continue
         if (not allow_prerelease) and rel.get("prerelease"):
             continue
-        for a in rel.get("assets") or []:
-            name = a.get("name","")
-            if name.endswith("amd64.deb"):
-                dl = a.get("browser_download_url")
-                tag = (rel.get("tag_name") or "").lstrip("v")
-                if not tag:
-                    m = re.search(r"([0-9]+\.[0-9]+(?:\.[0-9]+)*)", name)
-                    tag = m.group(1) if m else "0"
-                return dl, tag, name
-    raise RuntimeError("No encontré asset amd64.deb en releases de GitHub")
 
+        tag = (rel.get("tag_name") or "").lstrip("v")
+        for a in rel.get("assets") or []:
+            name = a.get("name", "")
+            m = name_re.search(name)
+            if not m:
+                continue
+            ver = tag or (m.group(1) if m and m.groups() else None)
+            if not ver:
+                m2 = re.search(r"([0-9]+\.[0-9]+(?:\.[0-9]+)*)", name)
+                ver = m2.group(1) if m2 else "0"
+            return a.get("browser_download_url"), ver, name
+
+    raise RuntimeError(f"No encontré asset que matchee {name_re.pattern} en releases de {repo}")
+
+# =========================
+#  FreeTube (GitHub releases)
+# =========================
 def freetube_latest_deb_url_and_version():
-    url, version, fname = github_latest_asset(FREETUBE_REPO, FREETUBE_ALLOW_PRERELEASE)
-    return url, version, fname
+    # Cualquier .deb amd64; respetar PRERELEASE según config
+    name_re = re.compile(r".*amd64\.deb$")
+    return github_latest_asset_by_regex(FREETUBE_REPO, name_re, allow_prerelease=FREETUBE_ALLOW_PRERELEASE)
 
 # =========================
 #  GitHub Desktop (GitHub releases)
 # =========================
 def github_desktop_latest_deb_url_and_version():
-    url = f"{GITHUB_API}/repos/{GH_DESKTOP_REPO}/releases?per_page=10"
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "apt-repo-bot/1.0",
-    }
-    tok = os.getenv("GITHUB_TOKEN")
-    if tok:
-        headers["Authorization"] = f"Bearer {tok}"
-
-    r = requests.get(url, headers=headers, timeout=30)
-    r.raise_for_status()
-    for rel in r.json():
-        if rel.get("draft"):
-            continue
-        # Tomar el primer asset .deb amd64
-        for a in rel.get("assets") or []:
-            name = a.get("name", "")
-            if name.endswith(".deb") and "amd64" in name:
-                dl = a.get("browser_download_url")
-                tag = (rel.get("tag_name") or "").lstrip("v")
-                if not tag:
-                    m = re.search(r"([0-9]+\.[0-9]+(?:\.[0-9]+)*)", name)
-                    tag = m.group(1) if m else "0"
-                return dl, tag, name
-    raise RuntimeError("No encontré .deb amd64 para GitHub Desktop")
+    # .deb con "amd64" en el nombre
+    name_re = re.compile(r".*amd64.*\.deb$")
+    return github_latest_asset_by_regex(GH_DESKTOP_REPO, name_re, allow_prerelease=True)
 
 # =========================
-#  Redroot Kernels helpers
+#  Heroic Launcher
+# =========================
+def heroic_latest_deb_url_and_version():
+    # Formato: Heroic-2.18.1-linux-amd64.deb -> capturamos versión
+    name_re = re.compile(r"^Heroic-([0-9]+\.[0-9]+(?:\.[0-9]+)*)-linux-amd64\.deb$")
+    return github_latest_asset_by_regex(HEROIC_REPO, name_re, allow_prerelease=False)
+
+# =========================
+#  Redroot Kernels helpers (sección delicada: sin refactor)
 # =========================
 def github_latest_release_assets(repo: str):
     """Devuelve la lista de assets del release más reciente (no draft)."""
@@ -458,6 +468,11 @@ def one_cycle():
     if download_if_needed(url_gd, ver_gd, subdir=GH_DESKTOP_SUBDIR, target_name=clean_name_gd):
         changed = True
 
+    # Heroic Launcher (conserva solo la última) – mantiene el nombre original del asset
+    url_h, ver_h, name_h = heroic_latest_deb_url_and_version()
+    if download_if_needed(url_h, ver_h, subdir=HEROIC_SUBDIR, target_name=name_h):
+        changed = True
+
     # Redroot Kernels (mantiene últimas 3 por CPU)
     if ingest_redroot_kernels():
         changed = True
@@ -485,3 +500,4 @@ def run_daemon():
 
 if __name__ == "__main__":
     run_daemon()
+

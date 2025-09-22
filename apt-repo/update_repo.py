@@ -21,6 +21,12 @@ ARCHES = ["amd64", "i386", "arm64", "armhf"]
 GITHUB_API = "https://api.github.com"
 
 # =========================
+#  Paquetes locales
+# =========================
+LOCAL_SUBDIR = "local"                             # pool/main/local
+LOCAL_DROP_DIR = REPO_DIR / "local-drop"           # dónde dejas tus .deb
+
+# =========================
 #  GitHub Desktop (GitHub)
 # =========================
 GH_DESKTOP_REPO = "shiftkey/desktop"
@@ -93,6 +99,35 @@ def ensure_layout():
     (REPO_DIR / "pool" / "main" / GH_DESKTOP_SUBDIR).mkdir(parents=True, exist_ok=True)
     (REPO_DIR / "pool" / "main" / KERNEL_SUBDIR).mkdir(parents=True, exist_ok=True)
     (REPO_DIR / "pool" / "main" / HEROIC_SUBDIR).mkdir(parents=True, exist_ok=True)
+    (REPO_DIR / "pool" / "main" / LOCAL_SUBDIR).mkdir(parents=True, exist_ok=True)
+    LOCAL_DROP_DIR.mkdir(parents=True, exist_ok=True)
+
+# =========================
+#  Local Drop
+# =========================
+def ingest_local_drop():
+    """
+    Mueve .deb desde LOCAL_DROP_DIR a pool/main/LOCAL_SUBDIR (si no existen),
+    genera .sha256 y devuelve True si hubo cambios.
+    """
+    changed = False
+    pool_dir = REPO_DIR / "pool" / "main" / LOCAL_SUBDIR
+    pool_dir.mkdir(parents=True, exist_ok=True)
+    LOCAL_DROP_DIR.mkdir(parents=True, exist_ok=True)
+
+    for p in sorted(LOCAL_DROP_DIR.glob("*.deb")):
+        target = pool_dir / p.name
+        if target.exists():
+            log(f"[local] Ya existe {target.name}; skip.")
+            continue
+        log(f"[local] Ingresando {p.name} → pool/{LOCAL_SUBDIR}/")
+        p.replace(target)  # mueve/renombra dentro del mismo FS
+        (target.with_suffix(".deb.sha256")).write_text(
+            f"{sha256sum(target)}  {target.name}\n", encoding="utf-8"
+        )
+        changed = True
+
+    return changed
 
 # =========================
 #  Discord
@@ -451,6 +486,10 @@ def initial_build():
 def one_cycle():
     ensure_layout()
     changed = False
+
+    # Ingesta local (paquetes que dejas en /var/www/debian-redroot/local-drop)
+    if ingest_local_drop():
+        changed = True
 
     # Discord (conserva solo la última)
     url_d, ver_d = latest_deb_url_and_version()
